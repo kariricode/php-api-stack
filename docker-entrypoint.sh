@@ -1,0 +1,248 @@
+#!/bin/bash
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+    exit 1
+}
+
+# Function to wait for a service to be ready
+wait_for_service() {
+    local service=$1
+    local max_attempts=${2:-30}
+    local attempt=0
+    
+    log_info "Waiting for $service to be ready..."
+    
+    case $service in
+        "php-fpm")
+            while [ $attempt -lt $max_attempts ]; do
+                if php-fpm -t >/dev/null 2>&1; then
+                    log_info "PHP-FPM configuration valid"
+                    return 0
+                fi
+                attempt=$((attempt + 1))
+                sleep 1
+            done
+            ;;
+        "nginx")
+            while [ $attempt -lt $max_attempts ]; do
+                if nginx -t >/dev/null 2>&1; then
+                    log_info "Nginx configuration valid"
+                    return 0
+                fi
+                attempt=$((attempt + 1))
+                sleep 1
+            done
+            ;;
+        "redis")
+            while [ $attempt -lt $max_attempts ]; do
+                if redis-cli ping >/dev/null 2>&1; then
+                    log_info "Redis is responding"
+                    return 0
+                fi
+                attempt=$((attempt + 1))
+                sleep 1
+            done
+            ;;
+    esac
+    
+    log_warning "$service failed to start after $max_attempts attempts"
+    return 1
+}
+
+# Process configuration templates
+log_info "Processing configuration templates..."
+/usr/local/bin/process-configs
+
+# Create required directories
+log_info "Creating required directories..."
+mkdir -p /var/run/php /var/run/nginx /var/log/php /var/log/nginx /var/log/redis /var/log/supervisor
+chown -R nginx:nginx /var/run/php /var/log/php
+chown -R nginx:nginx /var/run/nginx /var/log/nginx
+
+# Fix permissions for session directory if using files
+if [ "${PHP_SESSION_SAVE_HANDLER}" = "files" ]; then
+    mkdir -p /var/lib/php/sessions
+    chown -R nginx:nginx /var/lib/php/sessions
+    chmod 700 /var/lib/php/sessions
+fi
+
+# Validate configurations
+log_info "Validating configurations..."
+php-fpm -t || log_error "PHP-FPM configuration test failed"
+nginx -t || log_error "Nginx configuration test failed"
+
+# Handle Symfony-specific initialization
+if [ -f "/var/www/html/bin/console" ]; then
+    log_info "Symfony application detected"
+    
+    # Clear and warm up cache
+    if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
+        log_info "Warming up Symfony cache..."
+        su -s /bin/bash -c "php bin/console cache:clear --env=prod --no-debug" nginx
+        su -s /bin/bash -c "php bin/console cache:warmup --env=prod --no-debug" nginx
+    fi
+    
+    # Run migrations if configured
+    if [ "${RUN_MIGRATIONS}" = "true" ]; then
+        log_info "Running database migrations..."
+        su -s /bin/bash -c "php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration" nginx
+    fi
+    
+    # Install assets
+    if [ -d "/var/www/html/public/bundles" ]; then
+        log_info "Installing Symfony assets..."
+        su -s /bin/bash -c "php bin/console assets:install public --symlink --relative" nginx
+    fi
+fi
+
+# Create health check endpoint
+cat > /var/www/html/public/health.php << 'EOF'
+<?php
+header('Content-Type: application/json');
+
+$checks = [
+    'status' => 'healthy',
+    'timestamp' => date('c'),
+    'checks' => []
+];
+
+// Check PHP
+$checks['checks']['php'] = [
+    'status' => 'up',
+    'version' => PHP_VERSION
+];
+
+// Check OPcache
+if (function_exists('opcache_get_status')) {
+    $opcacheStatus = opcache_get_status(false);
+    $checks['checks']['opcache'] = [
+        'status' => $opcacheStatus !== false ? 'up' : 'down',
+        'enabled' => $opcacheStatus !== false
+    ];
+}
+
+// Check Redis connection
+try {
+    $redis = new Redis();
+    $redis->connect('127.0.0.1', 6379, 1);
+    $redis->ping();
+    $checks['checks']['redis'] = ['status' => 'up'];
+    $redis->close();
+} catch (Exception $e) {
+    $checks['checks']['redis'] = ['status' => 'down', 'error' => $e->getMessage()];
+    $checks['status'] = 'degraded';
+}
+
+// Check disk space
+$freeSpace = disk_free_space('/');
+$totalSpace = disk_total_space('/');
+$usedPercentage = round((($totalSpace - $freeSpace) / $totalSpace) * 100, 2);
+$checks['checks']['disk'] = [
+    'status' => $usedPercentage < 90 ? 'up' : 'warning',
+    'used_percentage' => $usedPercentage
+];
+
+http_response_code($checks['status'] === 'healthy' ? 200 : 503);
+echo json_encode($checks, JSON_PRETTY_PRINT);
+EOF
+
+chown nginx:nginx /var/www/html/public/health.php
+
+# Set up log rotation
+cat > /etc/logrotate.d/php-api-stack << EOF
+/var/log/nginx/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 640 nginx nginx
+    sharedscripts
+    postrotate
+        [ -f /var/run/nginx.pid ] && kill -USR1 \$(cat /var/run/nginx.pid)
+    endscript
+}
+
+/var/log/php/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 640 nginx nginx
+}
+
+/var/log/redis/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 640 redis redis
+}
+EOF
+
+# Performance tuning for production
+if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
+    log_info "Applying production performance optimizations..."
+    
+    # Increase system limits
+    ulimit -n 65536 2>/dev/null || log_warning "Could not set ulimit -n (normal in containers)"
+    ulimit -c unlimited 2>/dev/null || true
+    
+    # TCP optimizations
+    if [ -w /proc/sys/net/core/somaxconn ]; then
+        echo 1024 > /proc/sys/net/core/somaxconn
+    fi
+    
+    if [ -w /proc/sys/net/ipv4/tcp_max_syn_backlog ]; then
+        echo 2048 > /proc/sys/net/ipv4/tcp_max_syn_backlog
+    fi
+fi
+
+# Start services based on command
+if [ "$1" = "supervisord" ] || [ "$1" = "supervisor" ]; then
+    log_info "Starting all services with Supervisor..."
+    exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+elif [ "$1" = "php-fpm" ]; then
+    log_info "Starting PHP-FPM only..."
+    exec php-fpm -F
+elif [ "$1" = "nginx" ]; then
+    log_info "Starting Nginx only..."
+    exec nginx -g 'daemon off;'
+elif [ "$1" = "redis" ]; then
+    log_info "Starting Redis only..."
+    exec redis-server /etc/redis/redis.conf
+elif [ "$1" = "console" ] || [ "$1" = "symfony" ]; then
+    shift
+    log_info "Running Symfony console command..."
+    exec su -s /bin/bash -c "php bin/console $*" nginx
+else
+    # Default: start supervisord if no command given
+    if [ "$#" -eq 0 ]; then
+        log_info "Starting all services with Supervisor (default)..."
+        exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+    else
+        # Pass through any command
+        exec "$@"
+    fi
+fi

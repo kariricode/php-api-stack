@@ -1,0 +1,66 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Application
+app/vendor/
+app/node_modules/
+app/var/
+app/.env
+app/.env.local
+
+# Logs
+logs/
+*.log
+/var/log/
+
+# Docker
+docker-compose.override.yml
+*.tar
+*.tar.gz
+
+# SSL certificates
+ssl/
+*.pem
+*.key
+*.crt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+
+# Test files
+test-app/
+coverage/
+.phpunit.result.cache
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.bak
+
+# Redis
+dump.rdb
+appendonly.aof
+
+# Symfony
+/var/
+/vendor/
+.phpunit.result.cache
+/phpunit.xml
+symfony.lock

@@ -1,0 +1,169 @@
+# ============================================
+# Docker Ignore File for PHP API Stack
+# Reduces build context size and speeds up builds
+# ============================================
+
+# Version Control
+.git
+.github/
+.gitignore
+.gitattributes
+.gitmodules
+
+# Environment & Configuration
+.env
+.env.*
+!.env.example
+*.env.local
+*.env.*.local
+
+# IDE & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+.project
+.settings/
+.buildpath
+*.sublime-*
+.atom/
+.brackets.json
+.phpstorm.meta.php
+.phpunit.result.cache
+
+# Documentation
+*.md
+README*
+CHANGELOG*
+LICENSE*
+CONTRIBUTING*
+AUTHORS
+INSTALL
+NEWS
+THANKS
+TODO
+UPGRADE
+docs/
+documentation/
+
+# Build Scripts & CI/CD
+build.sh
+build-from-env.sh
+diagnose.sh
+Makefile
+.travis.yml
+.gitlab-ci.yml
+.circleci/
+.drone.yml
+bitbucket-pipelines.yml
+azure-pipelines.yml
+
+# Docker Files (prevent recursion)
+Dockerfile*
+docker-compose*.yml
+docker-compose*.yaml
+.dockerignore
+
+# Application Runtime (if not needed in image)
+var/cache/*
+var/log/*
+var/sessions/*
+vendor/
+node_modules/
+bower_components/
+
+# Testing
+tests/
+phpunit.xml*
+.phpunit/
+behat.yml
+codeception.yml
+.codeception/
+coverage/
+.nyc_output/
+
+# Temporary Files
+*.log
+*.tmp
+*.temp
+*.cache
+*.pid
+*.seed
+*.backup
+*.bak
+*.orig
+*.rej
+*.patch
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+
+# Package Managers Artifacts
+composer.phar
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+yarn-error.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Archive Files
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.rar
+*.7z
+
+# Database
+*.sql
+*.sqlite
+*.db
+data/
+database/
+
+# Deployment
+deployment/
+deploy/
+.deploy*/
+
+# Monitoring & Analytics
+monitoring/
+grafana/
+prometheus/
+
+# SSL Certificates (keep templates only)
+ssl/*.pem
+ssl/*.crt
+ssl/*.key
+ssl/*.csr
+!ssl/*.example
+
+# Application specific (customize as needed)
+app/cache/
+app/logs/
+app/sessions/
+storage/
+uploads/
+public/uploads/
+public/storage/
+public/hot
+
+# Keep these files/folders (explicitly include)
+!nginx/
+!php/
+!redis/
+!supervisor/
+!scripts/
+!app/public/index.php
