@@ -20,6 +20,30 @@ log_error() {
     exit 1
 }
 
+# ==============================================================================
+# BYPASS RÁPIDO PARA COMANDOS SIMPLES
+# ==============================================================================
+# Se for apenas verificação de versão ou comando direto, executar sem processamento
+if [[ "$1" == "php" && "$2" == "-v" ]] || \
+   [[ "$1" == "php" && "$2" == "--version" ]] || \
+   [[ "$1" == "nginx" && "$2" == "-v" ]] || \
+   [[ "$1" == "nginx" && "$2" == "-V" ]] || \
+   [[ "$1" == "redis-server" && "$2" == "--version" ]] || \
+   [[ "$1" == "redis-cli" && "$2" == "--version" ]] || \
+   [[ "$1" == "composer" && "$2" == "--version" ]] || \
+   [[ "$1" == "symfony" && "$2" == "version" ]]; then
+    exec "$@"
+fi
+
+# Se for comando básico sem argumentos complexos
+if [[ "$1" == "bash" ]] || [[ "$1" == "sh" ]] || [[ "$1" == "/bin/bash" ]] || [[ "$1" == "/bin/sh" ]]; then
+    exec "$@"
+fi
+
+# ==============================================================================
+# PROCESSAMENTO COMPLETO PARA EXECUÇÃO NORMAL
+# ==============================================================================
+
 # Function to wait for a service to be ready
 wait_for_service() {
     local service=$1
@@ -65,11 +89,18 @@ wait_for_service() {
     return 1
 }
 
-# Process configuration templates
-log_info "Processing configuration templates..."
-/usr/local/bin/process-configs
+# Check if configurations need to be processed
+CONFIG_PROCESSED_FLAG="/tmp/.config_processed"
+if [ ! -f "$CONFIG_PROCESSED_FLAG" ]; then
+    # Process configuration templates
+    log_info "Processing configuration templates..."
+    /usr/local/bin/process-configs
+    touch "$CONFIG_PROCESSED_FLAG"
+else
+    log_info "Configurations already processed, skipping..."
+fi
 
-# Create required directories
+# Create required directories (sempre necessário caso volumes sejam montados)
 log_info "Creating required directories..."
 mkdir -p /var/run/php /var/run/nginx /var/log/php /var/log/nginx /var/log/redis /var/log/supervisor
 chown -R nginx:nginx /var/run/php /var/log/php
@@ -82,10 +113,14 @@ if [ "${PHP_SESSION_SAVE_HANDLER}" = "files" ]; then
     chmod 700 /var/lib/php/sessions
 fi
 
-# Validate configurations
-log_info "Validating configurations..."
-php-fpm -t || log_error "PHP-FPM configuration test failed"
-nginx -t || log_error "Nginx configuration test failed"
+# Validate configurations apenas se não foram validadas ainda
+VALIDATION_FLAG="/tmp/.config_validated"
+if [ ! -f "$VALIDATION_FLAG" ]; then
+    log_info "Validating configurations..."
+    php-fpm -t 2>&1 | grep -q "test is successful" || log_error "PHP-FPM configuration test failed"
+    nginx -t 2>&1 | grep -q "test is successful" || log_error "Nginx configuration test failed"
+    touch "$VALIDATION_FLAG"
+fi
 
 # Handle Symfony-specific initialization
 if [ -f "/var/www/html/bin/console" ]; then
@@ -93,26 +128,36 @@ if [ -f "/var/www/html/bin/console" ]; then
     
     # Clear and warm up cache
     if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
-        log_info "Warming up Symfony cache..."
-        su -s /bin/bash -c "php bin/console cache:clear --env=prod --no-debug" nginx
-        su -s /bin/bash -c "php bin/console cache:warmup --env=prod --no-debug" nginx
+        CACHE_FLAG="/tmp/.symfony_cache_warmed"
+        if [ ! -f "$CACHE_FLAG" ]; then
+            log_info "Warming up Symfony cache..."
+            su -s /bin/bash -c "php bin/console cache:clear --env=prod --no-debug" nginx
+            su -s /bin/bash -c "php bin/console cache:warmup --env=prod --no-debug" nginx
+            touch "$CACHE_FLAG"
+        fi
     fi
     
     # Run migrations if configured
     if [ "${RUN_MIGRATIONS}" = "true" ]; then
         log_info "Running database migrations..."
-        su -s /bin/bash -c "php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration" nginx
+        su -s /bin/bash -c "php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration" nginx || \
+            log_warning "Migration failed or no migrations to run"
     fi
     
     # Install assets
     if [ -d "/var/www/html/public/bundles" ]; then
-        log_info "Installing Symfony assets..."
-        su -s /bin/bash -c "php bin/console assets:install public --symlink --relative" nginx
+        ASSETS_FLAG="/tmp/.symfony_assets_installed"
+        if [ ! -f "$ASSETS_FLAG" ]; then
+            log_info "Installing Symfony assets..."
+            su -s /bin/bash -c "php bin/console assets:install public --symlink --relative" nginx
+            touch "$ASSETS_FLAG"
+        fi
     fi
 fi
 
-# Create health check endpoint
-cat > /var/www/html/public/health.php << 'EOF'
+# Create health check endpoint if doesn't exist
+if [ ! -f "/var/www/html/public/health.php" ]; then
+    cat > /var/www/html/public/health.php << 'EOF'
 <?php
 header('Content-Type: application/json');
 
@@ -130,7 +175,7 @@ $checks['checks']['php'] = [
 
 // Check OPcache
 if (function_exists('opcache_get_status')) {
-    $opcacheStatus = opcache_get_status(false);
+    $opcacheStatus = @opcache_get_status(false);
     $checks['checks']['opcache'] = [
         'status' => $opcacheStatus !== false ? 'up' : 'down',
         'enabled' => $opcacheStatus !== false
@@ -139,11 +184,15 @@ if (function_exists('opcache_get_status')) {
 
 // Check Redis connection
 try {
-    $redis = new Redis();
-    $redis->connect('127.0.0.1', 6379, 1);
-    $redis->ping();
-    $checks['checks']['redis'] = ['status' => 'up'];
-    $redis->close();
+    if (class_exists('Redis')) {
+        $redis = new Redis();
+        $redis->connect('127.0.0.1', 6379, 1);
+        $redis->ping();
+        $checks['checks']['redis'] = ['status' => 'up'];
+        $redis->close();
+    } else {
+        $checks['checks']['redis'] = ['status' => 'down', 'error' => 'Redis extension not installed'];
+    }
 } catch (Exception $e) {
     $checks['checks']['redis'] = ['status' => 'down', 'error' => $e->getMessage()];
     $checks['status'] = 'degraded';
@@ -161,11 +210,12 @@ $checks['checks']['disk'] = [
 http_response_code($checks['status'] === 'healthy' ? 200 : 503);
 echo json_encode($checks, JSON_PRETTY_PRINT);
 EOF
+    chown nginx:nginx /var/www/html/public/health.php
+fi
 
-chown nginx:nginx /var/www/html/public/health.php
-
-# Set up log rotation
-cat > /etc/logrotate.d/php-api-stack << EOF
+# Set up log rotation apenas uma vez
+if [ ! -f "/etc/logrotate.d/php-api-stack" ]; then
+    cat > /etc/logrotate.d/php-api-stack << EOF
 /var/log/nginx/*.log {
     daily
     missingok
@@ -200,6 +250,7 @@ cat > /etc/logrotate.d/php-api-stack << EOF
     create 640 redis redis
 }
 EOF
+fi
 
 # Performance tuning for production
 if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
@@ -209,7 +260,7 @@ if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
     ulimit -n 65536 2>/dev/null || log_warning "Could not set ulimit -n (normal in containers)"
     ulimit -c unlimited 2>/dev/null || true
     
-    # TCP optimizations
+    # TCP optimizations (geralmente não funcionam em containers, mas tentamos)
     if [ -w /proc/sys/net/core/somaxconn ]; then
         echo 1024 > /proc/sys/net/core/somaxconn
     fi
@@ -219,30 +270,41 @@ if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
     fi
 fi
 
-# Start services based on command
-if [ "$1" = "supervisord" ] || [ "$1" = "supervisor" ]; then
-    log_info "Starting all services with Supervisor..."
-    exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
-elif [ "$1" = "php-fpm" ]; then
-    log_info "Starting PHP-FPM only..."
-    exec php-fpm -F
-elif [ "$1" = "nginx" ]; then
-    log_info "Starting Nginx only..."
-    exec nginx -g 'daemon off;'
-elif [ "$1" = "redis" ]; then
-    log_info "Starting Redis only..."
-    exec redis-server /etc/redis/redis.conf
-elif [ "$1" = "console" ] || [ "$1" = "symfony" ]; then
-    shift
-    log_info "Running Symfony console command..."
-    exec su -s /bin/bash -c "php bin/console $*" nginx
-else
-    # Default: start supervisord if no command given
-    if [ "$#" -eq 0 ]; then
-        log_info "Starting all services with Supervisor (default)..."
+# ==============================================================================
+# START SERVICES BASED ON COMMAND
+# ==============================================================================
+
+# Comandos específicos
+case "$1" in
+    supervisord|supervisor)
+        log_info "Starting all services with Supervisor..."
         exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
-    else
-        # Pass through any command
-        exec "$@"
-    fi
-fi
+        ;;
+    php-fpm)
+        log_info "Starting PHP-FPM only..."
+        exec php-fpm -F
+        ;;
+    nginx)
+        log_info "Starting Nginx only..."
+        exec nginx -g 'daemon off;'
+        ;;
+    redis|redis-server)
+        log_info "Starting Redis only..."
+        exec redis-server /etc/redis/redis.conf
+        ;;
+    console|symfony)
+        shift
+        log_info "Running Symfony console command..."
+        exec su -s /bin/bash -c "php bin/console $*" nginx
+        ;;
+    *)
+        # Default: start supervisord if no command given
+        if [ "$#" -eq 0 ]; then
+            log_info "Starting all services with Supervisor (default)..."
+            exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+        else
+            # Pass through any command
+            exec "$@"
+        fi
+        ;;
+esac

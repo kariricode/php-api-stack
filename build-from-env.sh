@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build script for dtihubmaker/php-api-stack
+# Build script for kariricode/php-api-stack
 # This script reads all configurations from .env file and builds the Docker image
 # Usage: ./build-from-env.sh [--push] [--no-cache]
 
@@ -106,7 +106,7 @@ source .env
 set +a
 
 # Set default values if not defined in .env
-DOCKER_HUB_USER="${DOCKER_HUB_USER:-dtihubmaker}"
+DOCKER_HUB_USER="${DOCKER_HUB_USER:-kariricode}"
 IMAGE_NAME="${IMAGE_NAME:-php-api-stack}"
 FULL_IMAGE="${DOCKER_HUB_USER}/${IMAGE_NAME}"
 

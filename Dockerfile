@@ -1,13 +1,12 @@
-# Multi-stage build for dtihubmaker/php-api-stack
+# Multi-stage build for kariricode/php-api-stack
 # Production-ready PHP + Nginx + Redis + Symfony CLI stack
 # Version: Dynamic from build args
 
 # Build arguments
-ARG PHP_VERSION=8.2
+ARG PHP_VERSION=8.4
 ARG NGINX_VERSION=1.27.3
 ARG REDIS_VERSION=7.2
-ARG ALPINE_VERSION=3.18
-ARG VERSION=1.0.8
+ARG VERSION=1.2.0
 
 # Stage 1: Redis binaries
 FROM redis:${REDIS_VERSION}-alpine AS redis-build
@@ -16,15 +15,15 @@ FROM redis:${REDIS_VERSION}-alpine AS redis-build
 FROM nginx:${NGINX_VERSION}-alpine AS nginx-build
 
 # Stage 3: Main application
-FROM php:${PHP_VERSION}-fpm-alpine${ALPINE_VERSION} AS base
+FROM php:${PHP_VERSION}-fpm-alpine AS base
 
 # Import build arguments
 ARG PHP_VERSION
 ARG NGINX_VERSION
 ARG REDIS_VERSION
 ARG COMPOSER_VERSION=2.8.12
-ARG SYMFONY_CLI_VERSION=7.0.0
-ARG PHP_CORE_EXTENSIONS="pdo pdo_mysql opcache intl zip bcmath curl mbstring xml dom fileinfo tokenizer session sockets"
+ARG SYMFONY_CLI_VERSION=7.3.0
+ARG PHP_CORE_EXTENSIONS="pdo pdo_mysql opcache intl zip bcmath gd mbstring xml"
 ARG PHP_PECL_EXTENSIONS="redis apcu uuid"
 ARG APP_ENV=production
 ARG BUILD_DATE
@@ -32,13 +31,13 @@ ARG VCS_REF
 ARG VERSION
 
 # Metadata with dynamic version
-LABEL maintainer="dtihubmaker <dtihubmaker@github.com>" \
+LABEL maintainer="kariricode <kariricode@github.com>" \
     org.opencontainers.image.title="PHP API Stack" \
     org.opencontainers.image.description="Production-ready PHP + Nginx + Redis + Symfony stack" \
     org.opencontainers.image.version="${VERSION}" \
     org.opencontainers.image.created="${BUILD_DATE}" \
     org.opencontainers.image.revision="${VCS_REF}" \
-    org.opencontainers.image.source="https://github.com/dtihubmaker/php-api-stack" \
+    org.opencontainers.image.source="https://github.com/kariricode/php-api-stack" \
     stack.nginx.version="${NGINX_VERSION}" \
     stack.php.version="${PHP_VERSION}" \
     stack.redis.version="${REDIS_VERSION}" \
@@ -115,55 +114,84 @@ RUN set -eux; \
     linux-headers; \
     rm -rf /var/cache/apk/*
 
-# Install PHP Extensions
+# Install PHP Core Extensions with improved error handling
 RUN set -eux; \
-    EXT_LIST=""; \
+    echo "==> Processing PHP Core Extensions..."; \
+    # Map of valid extensions that can be installed
+    # Extensions that are built-in or don't need installation: tokenizer, filter, json, phar, posix, fileinfo, ctype, iconv, session
+    INSTALLABLE_EXTENSIONS=""; \
     for ext in $PHP_CORE_EXTENSIONS; do \
     case "$ext" in \
-    pdo|pdo_mysql|pdo_pgsql|opcache|intl|zip|bcmath|gd|mysqli|curl|mbstring|xml|dom|fileinfo|ctype|iconv|session|simplexml|sockets|pcntl|exif) \
-    EXT_LIST="$EXT_LIST $ext" ;; \
-    tokenizer|filter|json|phar|posix) ;; \
-    *) echo "Warning: Unknown extension $ext, skipping" ;; \
+    # Valid extensions that need installation
+    pdo|pdo_mysql|pdo_pgsql|opcache|intl|zip|bcmath|gd|mysqli|mbstring|xml|dom|simplexml|sockets|pcntl|exif) \
+    echo "  [✓] Adding $ext to installation list"; \
+    INSTALLABLE_EXTENSIONS="$INSTALLABLE_EXTENSIONS $ext" \
+    ;; \
+    # Built-in extensions (skip with info)
+    tokenizer|filter|json|phar|posix|fileinfo|ctype|iconv|session|curl) \
+    echo "  [i] $ext is built-in, skipping installation" \
+    ;; \
+    # Unknown extension (skip with warning)
+    *) \
+    echo "  [!] Warning: Unknown extension '$ext', skipping" \
+    ;; \
     esac; \
     done; \
-    if echo " $EXT_LIST " | grep -q " gd "; then \
+    # Configure GD if present
+    if echo " $INSTALLABLE_EXTENSIONS " | grep -q " gd "; then \
+    echo "==> Configuring GD with FreeType and JPEG support..."; \
     docker-php-ext-configure gd --with-freetype --with-jpeg; \
     fi; \
-    if [ -n "$EXT_LIST" ]; then \
-    echo "Installing PHP extensions: $EXT_LIST"; \
-    docker-php-ext-install -j$(nproc) $EXT_LIST; \
-    fi; \
-    php -m | grep -E '^(pdo|opcache|intl|zip|bcmath|mbstring|xml|dom)' || true
+    # Install extensions if any
+    if [ -n "$INSTALLABLE_EXTENSIONS" ]; then \
+    echo "==> Installing PHP extensions:$INSTALLABLE_EXTENSIONS"; \
+    docker-php-ext-install -j$(nproc) $INSTALLABLE_EXTENSIONS; \
+    echo "==> Verifying installed extensions..."; \
+    php -m; \
+    else \
+    echo "==> No core extensions to install"; \
+    fi
 
-# Install PECL Extensions
+# Install PECL Extensions with improved error handling
 RUN set -eux; \
+    echo "==> Processing PECL Extensions..."; \
     if [ -n "$PHP_PECL_EXTENSIONS" ]; then \
-    EXT_LIST=""; \
+    INSTALLABLE_PECL=""; \
     for ext in $PHP_PECL_EXTENSIONS; do \
     case "$ext" in \
     redis|apcu|uuid|xdebug|imagick|amqp|swoole) \
-    EXT_LIST="$EXT_LIST $ext" ;; \
-    *) echo "Warning: Unknown PECL extension $ext, skipping" ;; \
+    echo "  [✓] Adding PECL extension: $ext"; \
+    INSTALLABLE_PECL="$INSTALLABLE_PECL $ext"; \
+    # Install system dependencies for specific extensions
+    case "$ext" in \
+    uuid) apk add --no-cache util-linux-dev ;; \
+    imagick) apk add --no-cache imagemagick-dev ;; \
+    amqp) apk add --no-cache rabbitmq-c-dev ;; \
+    esac \
+    ;; \
+    *) \
+    echo "  [!] Warning: Unknown PECL extension '$ext', skipping" \
+    ;; \
     esac; \
     done; \
-    if echo " $EXT_LIST " | grep -q " uuid "; then \
-    apk add --no-cache util-linux-dev; \
+    if [ -n "$INSTALLABLE_PECL" ]; then \
+    echo "==> Installing PECL extensions:$INSTALLABLE_PECL"; \
+    for ext in $INSTALLABLE_PECL; do \
+    echo "  --> Installing $ext..."; \
+    if pecl install $ext; then \
+    docker-php-ext-enable $ext; \
+    echo "  [✓] $ext installed successfully"; \
+    else \
+    echo "  [✗] Failed to install $ext (non-fatal)"; \
     fi; \
-    if echo " $EXT_LIST " | grep -q " imagick "; then \
-    apk add --no-cache imagemagick-dev; \
-    fi; \
-    if echo " $EXT_LIST " | grep -q " amqp "; then \
-    apk add --no-cache rabbitmq-c-dev; \
-    fi; \
-    if [ -n "$EXT_LIST" ]; then \
-    echo "Installing PECL extensions: $EXT_LIST"; \
-    for ext in $EXT_LIST; do \
-    pecl install $ext || echo "Failed to install $ext"; \
-    docker-php-ext-enable $ext || echo "Failed to enable $ext"; \
     done; \
-    fi; \
     pecl clear-cache; \
     rm -rf /tmp/pear; \
+    echo "==> Verifying PECL extensions..."; \
+    php -m | grep -iE '(redis|apcu|uuid|xdebug|imagick|amqp|swoole)' || true; \
+    fi; \
+    else \
+    echo "==> No PECL extensions to install"; \
     fi
 
 # Copy Nginx binaries from nginx image
@@ -180,20 +208,21 @@ COPY --from=redis-build /usr/local/bin/redis-* /usr/local/bin/
 
 # Install Composer with retry logic and multiple fallback methods
 RUN set -eux; \
+    echo "==> Installing Composer ${COMPOSER_VERSION}..."; \
     mkdir -p /composer; \
     EXPECTED_CHECKSUM="$(wget -q -O - https://composer.github.io/installer.sig)"; \
     for i in 1 2 3 4 5; do \
-    echo "Attempt $i to download Composer..."; \
+    echo "  Attempt $i to download Composer..."; \
     if wget -O composer-setup.php https://getcomposer.org/installer; then \
     ACTUAL_CHECKSUM="$(php -r "echo hash_file('sha384', 'composer-setup.php');")"; \
     if [ "$EXPECTED_CHECKSUM" = "$ACTUAL_CHECKSUM" ]; then \
-    echo "Installer verified, installing Composer..."; \
+    echo "  Installer verified, installing Composer..."; \
     php composer-setup.php --install-dir=/usr/local/bin --filename=composer --version=${COMPOSER_VERSION} && break; \
     else \
-    echo "ERROR: Invalid Composer installer signature"; \
+    echo "  ERROR: Invalid Composer installer signature"; \
     fi; \
     elif [ $i -eq 5 ]; then \
-    echo "Falling back to direct download of Composer phar..."; \
+    echo "  Falling back to direct download of Composer phar..."; \
     wget -O /usr/local/bin/composer "https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar" || \
     wget -O /usr/local/bin/composer "https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar"; \
     chmod +x /usr/local/bin/composer && break; \
@@ -202,20 +231,22 @@ RUN set -eux; \
     done; \
     rm -f composer-setup.php; \
     composer --version || exit 1; \
-    chmod 777 /composer
+    chmod 777 /composer; \
+    echo "  [✓] Composer installed successfully"
 
 # Install Symfony CLI with retry logic
 RUN set -eux; \
+    echo "==> Installing Symfony CLI ${SYMFONY_CLI_VERSION}..."; \
     for i in 1 2 3; do \
-    echo "Attempt $i to download Symfony CLI..."; \
+    echo "  Attempt $i to download Symfony CLI..."; \
     if wget -O - https://get.symfony.com/cli/installer | bash; then \
     mv /root/.symfony*/bin/symfony /usr/local/bin/symfony; \
     chmod +x /usr/local/bin/symfony; \
     rm -rf /root/.symfony*; \
     break; \
     elif [ $i -eq 3 ]; then \
-    echo "Falling back to direct download of Symfony CLI..."; \
-    wget -O symfony.tar.gz "https://github.com/symfony-cli/symfony-cli/releases/download/v${SYMFONY_CLI_VERSION}/symfony_${SYMFONY_CLI_VERSION}_linux_amd64.tar.gz" && \
+    echo "  Falling back to direct download of Symfony CLI..."; \
+    wget -O symfony.tar.gz "https://github.com/symfony-cli/symfony-cli/releases/download/v${SYMFONY_CLI_VERSION}/symfony-cli_linux_amd64.tar.gz" && \
     tar -xzf symfony.tar.gz -C /usr/local/bin && \
     rm symfony.tar.gz && \
     chmod +x /usr/local/bin/symfony; \
@@ -223,7 +254,8 @@ RUN set -eux; \
     fi; \
     sleep 2; \
     done; \
-    symfony version || echo "Symfony CLI installation failed (non-critical)"
+    symfony version || echo "  [!] Symfony CLI installation failed (non-critical)"; \
+    echo "  [✓] Symfony CLI installed successfully"
 
 # Create directory structure
 RUN set -eux; \
@@ -265,8 +297,7 @@ RUN set -eux; \
     chmod -R 755 /var/log; \
     chmod 755 /var/run
 
-
-# Garantir que PHP-FPM use socket (override de qualquer config padrão)
+# Ensure PHP-FPM uses Unix socket (override any default config)
 RUN mkdir -p /var/run/php && \
     chown nginx:nginx /var/run/php && \
     echo '[www]' > /usr/local/etc/php-fpm.d/zzz-socket-override.conf && \
@@ -276,15 +307,17 @@ RUN mkdir -p /var/run/php && \
     echo 'listen.mode = 0660' >> /usr/local/etc/php-fpm.d/zzz-socket-override.conf && \
     echo 'listen.backlog = 511' >> /usr/local/etc/php-fpm.d/zzz-socket-override.conf
 
-
 # Clean up build dependencies
 RUN set -eux; \
     apk del --no-cache .build-deps; \
     rm -rf /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/*; \
-    echo "Final user verification:"; \
+    echo "==> Final verification:"; \
     id nginx || exit 1; \
     id redis || exit 1; \
-    nginx -v || exit 1
+    nginx -v || exit 1; \
+    php -v || exit 1; \
+    echo "==> Installed PHP modules:"; \
+    php -m
 
 # Copy configuration templates
 COPY nginx/nginx.conf /etc/nginx/nginx.conf.template

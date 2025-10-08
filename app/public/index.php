@@ -3,7 +3,7 @@
 /**
  * PHP API Stack - Default Application
  * 
- * This is the default application served by dtihubmaker/php-api-stack
+ * This is the default application served by kariricode/php-api-stack
  * Replace this with your Symfony application
  */
 
@@ -24,7 +24,7 @@ $query = $_SERVER['QUERY_STRING'] ?? '';
 // Stack information
 $stackInfo = [
     'name' => 'PHP API Stack',
-    'image' => 'dtihubmaker/php-api-stack',
+    'image' => 'kariricode/php-api-stack',
     'version' => '1.0.0',
     'environment' => $_ENV['APP_ENV'] ?? 'production',
 ];
