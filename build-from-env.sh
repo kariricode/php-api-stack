@@ -23,6 +23,7 @@ NC='\033[0m' # No Color
 PUSH_TO_HUB=false
 NO_CACHE=false
 MULTI_PLATFORM=false
+TEST_BUILD=false
 
 for arg in "$@"; do
     case $arg in
@@ -38,6 +39,10 @@ for arg in "$@"; do
             MULTI_PLATFORM=true
             shift
             ;;
+        --test) 
+            TEST_BUILD=true
+            shift
+            ;;
         --version=*)
             VERSION_ARG="${arg#*=}"
             shift
@@ -49,6 +54,7 @@ for arg in "$@"; do
             echo "  --push           Push image to Docker Hub after build"
             echo "  --no-cache       Build without using cache"
             echo "  --multi-platform Build for multiple platforms (amd64, arm64)"
+            echo "  --test           Build with comprehensive health check"  # <-- ADICIONAR
             echo "  --version=X.Y.Z  Override version instead of using VERSION file"
             echo "  --help           Show this help message"
             exit 0
@@ -223,6 +229,12 @@ else
     BUILD_CMD="$BUILD_CMD --build-arg INSTALL_PHP_TOOLS=false"
 fi
 
+# Add health check type for test builds
+if [ "$TEST_BUILD" = true ]; then
+    BUILD_CMD="$BUILD_CMD --build-arg HEALTH_CHECK_TYPE=comprehensive"
+    log_info "Building with comprehensive health check"
+fi
+
 # Add tags
 BUILD_CMD="$BUILD_CMD \
     --tag ${FULL_IMAGE}:${VERSION} \
@@ -231,9 +243,25 @@ BUILD_CMD="$BUILD_CMD \
 # Add minor and major version tags
 MAJOR_VERSION=$(echo $VERSION | cut -d. -f1)
 MINOR_VERSION=$(echo $VERSION | cut -d. -f1-2)
-BUILD_CMD="$BUILD_CMD \
-    --tag ${FULL_IMAGE}:${MAJOR_VERSION} \
-    --tag ${FULL_IMAGE}:${MINOR_VERSION}"
+
+# Add tags
+if [ "$TEST_BUILD" = true ]; then
+    BUILD_CMD="$BUILD_CMD \
+        --tag ${FULL_IMAGE}:test \
+        --tag ${FULL_IMAGE}:test-${VERSION}"
+    log_info "Using test tags: test, test-${VERSION}"
+else
+    BUILD_CMD="$BUILD_CMD \
+        --tag ${FULL_IMAGE}:${VERSION} \
+        --tag ${FULL_IMAGE}:latest"
+    
+    # Add minor and major version tags
+    MAJOR_VERSION=$(echo $VERSION | cut -d. -f1)
+    MINOR_VERSION=$(echo $VERSION | cut -d. -f1-2)
+    BUILD_CMD="$BUILD_CMD \
+        --tag ${FULL_IMAGE}:${MAJOR_VERSION} \
+        --tag ${FULL_IMAGE}:${MINOR_VERSION}"
+fi
 
 # Add environment-specific tag
 if [ "${APP_ENV}" = "development" ]; then

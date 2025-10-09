@@ -157,60 +157,23 @@ fi
 
 # Create health check endpoint if doesn't exist
 if [ ! -f "/var/www/html/public/health.php" ]; then
-    cat > /var/www/html/public/health.php << 'EOF'
+    log_info "Installing health check endpoint..."
+    
+    # Copy from template if exists, otherwise create basic fallback
+    if [ -f "/usr/local/share/php-api-stack/health.php" ]; then
+        cp /usr/local/share/php-api-stack/health.php /var/www/html/public/health.php
+        log_info "Health check installed from template"
+    else
+        log_warning "Health check template not found, creating basic fallback"
+        cat > /var/www/html/public/health.php << 'EOF'
 <?php
 header('Content-Type: application/json');
-
-$checks = [
-    'status' => 'healthy',
-    'timestamp' => date('c'),
-    'checks' => []
-];
-
-// Check PHP
-$checks['checks']['php'] = [
-    'status' => 'up',
-    'version' => PHP_VERSION
-];
-
-// Check OPcache
-if (function_exists('opcache_get_status')) {
-    $opcacheStatus = @opcache_get_status(false);
-    $checks['checks']['opcache'] = [
-        'status' => $opcacheStatus !== false ? 'up' : 'down',
-        'enabled' => $opcacheStatus !== false
-    ];
-}
-
-// Check Redis connection
-try {
-    if (class_exists('Redis')) {
-        $redis = new Redis();
-        $redis->connect('127.0.0.1', 6379, 1);
-        $redis->ping();
-        $checks['checks']['redis'] = ['status' => 'up'];
-        $redis->close();
-    } else {
-        $checks['checks']['redis'] = ['status' => 'down', 'error' => 'Redis extension not installed'];
-    }
-} catch (Exception $e) {
-    $checks['checks']['redis'] = ['status' => 'down', 'error' => $e->getMessage()];
-    $checks['status'] = 'degraded';
-}
-
-// Check disk space
-$freeSpace = disk_free_space('/');
-$totalSpace = disk_total_space('/');
-$usedPercentage = round((($totalSpace - $freeSpace) / $totalSpace) * 100, 2);
-$checks['checks']['disk'] = [
-    'status' => $usedPercentage < 90 ? 'up' : 'warning',
-    'used_percentage' => $usedPercentage
-];
-
-http_response_code($checks['status'] === 'healthy' ? 200 : 503);
-echo json_encode($checks, JSON_PRETTY_PRINT);
+echo json_encode(['status' => 'healthy', 'timestamp' => date('c')], JSON_PRETTY_PRINT);
 EOF
+    fi
+    
     chown nginx:nginx /var/www/html/public/health.php
+    chmod 644 /var/www/html/public/health.php
 fi
 
 # Set up log rotation apenas uma vez

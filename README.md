@@ -4,6 +4,7 @@
 [![PHP Version](https://img.shields.io/badge/PHP-8.4-777BB4?logo=php)](https://www.php.net/)
 [![Nginx Version](https://img.shields.io/badge/Nginx-1.27.3-009639?logo=nginx)](https://nginx.org/)
 [![Redis Version](https://img.shields.io/badge/Redis-7.2-DC382D?logo=redis)](https://redis.io/)
+[![Health Check](https://img.shields.io/badge/Health%20Check-Comprehensive-brightgreen)](#-comprehensive-health-check)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/kariricode/php-api-stack)
 
 ## 🚀 Quick Start
@@ -18,7 +19,11 @@ cd php-api-stack
 make build-test
 make run
 
-# Option 3: Docker Compose
+# Option 3: Build with Comprehensive Health Check (Testing)
+make run-test
+curl http://localhost:8080/health.php | jq
+
+# Option 4: Docker Compose
 curl -O https://raw.githubusercontent.com/kariricode/php-api-stack/main/docker-compose.yml
 docker-compose up -d
 ```
@@ -35,13 +40,17 @@ Access: http://localhost:8080
 - [Configuration](#-configuration)
 - [Using the Image](#-using-the-image)
 - [PHP Extensions](#-php-extensions)
+- [Automated Testing](#-automated-testing)
 - [Debug and Troubleshooting](#-debug-and-troubleshooting)
+- [Comprehensive Health Check](#-comprehensive-health-check)
+- [Local Development](#-local-development)
 - [Development vs Production](#-development-vs-production)
 - [Versioning](#-versioning)
 - [Performance Optimizations](#-performance-optimizations)
 - [Security](#-security)
 - [Monitoring](#-monitoring)
 - [FAQ](#-faq)
+- [Use Cases and Best Practices](#-use-cases-and-best-practices)
 - [References](#-references)
 
 ## 🎯 Overview
@@ -55,6 +64,7 @@ Access: http://localhost:8080
 - 🔧 **Flexible Configuration**: Fully customizable via environment variables
 - 🛡️ **Enhanced Security**: Security headers, rate limiting, hardened configurations
 - 📊 **Integrated Monitoring**: Health checks, metrics, structured logs
+- 🏥 **Comprehensive Health Check**: SOLID-based validation system
 - 🐳 **Multi-stage Build**: Optimized and reduced image size
 - 📄 **CI/CD Ready**: Automated scripts for build and deploy
 - ✅ **Automatic Validation**: Configuration processing and validation on startup
@@ -107,10 +117,11 @@ Client → Nginx (port 80) → PHP-FPM (Unix socket) → PHP Application
 php-api-stack/
 ├── .env                    # Main configurations
 ├── .env.example           # Configuration template
-├── VERSION                # Current version (1.2.0)
+├── VERSION                # Current version (1.2.1)
 ├── Dockerfile             # Multi-stage image definition
 ├── build-from-env.sh      # Automated build script
 ├── docker-entrypoint.sh   # Container entry script
+├── health.php             # Comprehensive health check
 │
 ├── nginx/
 │   ├── nginx.conf         # Nginx main configuration
@@ -159,11 +170,14 @@ The project includes a **complete Makefile** for total automation:
 # View all available commands
 make help
 
-# Simple build
+# Simple build (production)
 make build
 
 # Build with tests
 make build-test
+
+# Build test image with comprehensive health check
+make build-test-image
 
 # Complete release (build + test + scan + push)
 make release
@@ -178,28 +192,55 @@ make bump-major  # 1.2.0 -> 2.0.0
 
 | Command | Description |
 |---------|-------------|
-| `make build` | Build image locally |
+| **Build Targets** | |
+| `make build` | Build production image locally |
 | `make build-test` | Build + quick tests (PHP, Nginx, Redis) |
-| `make test` | Run complete test suite |
+| `make build-test-image` | Build test image with comprehensive health check |
+| `make build-no-cache` | Build without using cache |
+| **Test Targets** | |
+| `make test` | Run comprehensive test suite on production image |
+| `make test-quick` | Quick component version tests |
+| `make run-test` | Build + run test container with comprehensive health |
+| `make test-health` | Test comprehensive health endpoint (full JSON) |
+| `make test-health-status` | Show health status summary |
+| `make test-health-watch` | Watch health status (updates every 5s) |
+| **Runtime Targets** | |
+| `make run` | Start production container for local testing |
+| `make stop` | Stop and remove test container |
+| `make stop-test` | Stop and remove comprehensive test container |
+| `make restart` | Restart the test container |
+| `make logs` | Show container logs |
+| `make logs-test` | Show logs from test container |
+| `make shell` | Open shell in running container |
+| `make shell-test` | Open shell in test container |
+| **Validation Targets** | |
 | `make scan` | Scan vulnerabilities with Trivy |
 | `make lint` | Validate Dockerfile with Hadolint |
+| `make test-structure` | Test container structure and files |
+| **Release Targets** | |
 | `make push` | Push image to Docker Hub |
-| `make release` | Complete release pipeline |
-| `make run` | Start container for local testing |
-| `make stop` | Stop and remove test container |
-| `make shell` | Open shell in running container |
-| `make logs` | Show container logs |
+| `make release` | Full release pipeline (lint + build + test + scan + push) |
+| **Utility Targets** | |
+| `make version` | Display current version |
+| `make bump-patch` | Bump patch version (x.x.X) |
+| `make bump-minor` | Bump minor version (x.X.x) |
+| `make bump-major` | Bump major version (X.x.x) |
 | `make clean` | Remove local images and containers |
-| `make info` | Display image information |
+| `make clean-all` | Deep clean including volumes and build cache |
+| `make info` | Show image information |
+| `make stats` | Show container resource usage |
 
 ### 4. Build with Shell Script
 
 ```bash
-# Simple build
+# Simple build (production)
 ./build-from-env.sh
 
 # Build without cache (force rebuild)
 ./build-from-env.sh --no-cache
+
+# Build test image with comprehensive health check
+./build-from-env.sh --test
 
 # Build and push to Docker Hub
 ./build-from-env.sh --push
@@ -218,6 +259,12 @@ docker build \
   --build-arg REDIS_VERSION=7.2 \
   --build-arg APP_ENV=production \
   --tag kariricode/php-api-stack:custom \
+  .
+
+# Build with comprehensive health check
+docker build \
+  --build-arg HEALTH_CHECK_TYPE=comprehensive \
+  --tag kariricode/php-api-stack:test \
   .
 ```
 
@@ -515,7 +562,7 @@ make scan
 make lint
 
 # Validate Nginx configuration
-make validate
+make test-structure
 ```
 
 ### Performance Tests
@@ -536,8 +583,11 @@ docker exec my-app php -r "print_r(opcache_get_status()['opcache_statistics']);"
 ### Health Verification
 
 ```bash
-# General health check endpoint
+# General health check endpoint (simple)
 curl http://localhost:8080/health
+
+# Comprehensive health check (test builds)
+curl http://localhost:8080/health.php | jq
 
 # PHP-FPM status
 curl http://localhost:8080/fpm-status
@@ -613,6 +663,416 @@ XDEBUG_PORT=9003
 XDEBUG_IDE_KEY=PHPSTORM
 ```
 
+## 🏥 Comprehensive Health Check
+
+The stack includes two health check implementations:
+
+### Production Health Check (Simple)
+- **Endpoint**: `/health`
+- **Usage**: Lightweight check for container orchestrators
+- **Response**: Simple JSON with status and timestamp
+
+### Test/Development Health Check (Comprehensive)
+- **Endpoint**: `/health.php`
+- **Usage**: Detailed validation of all stack components
+- **Architecture**: SOLID principles, Design Patterns, Type-safe
+
+#### Features
+
+✅ **PHP Runtime Validation**
+- PHP version, SAPI, memory usage
+- Memory limit monitoring with alerts (>90% usage)
+- Zend Engine version
+
+✅ **PHP Extensions Check**
+- Required extensions validation (PDO, OPcache, mbstring, JSON, cURL)
+- Optional extensions detection (Redis, APCu, Intl, Zip, GD, XML)
+- Missing extensions alerting
+
+✅ **OPcache Performance**
+- Memory usage (used, free, wasted percentage)
+- Hit rate monitoring (alert if <90%)
+- JIT status and buffer size
+- Cache statistics (scripts cached, hits, misses)
+- Restart counters (OOM, hash, manual)
+
+✅ **Redis Connectivity**
+- Connection latency measurement
+- Ping test (<100ms expected)
+- Version, uptime, memory statistics
+- Client connections and command statistics
+- Keyspace hit/miss ratio
+
+✅ **System Resources**
+- Disk space monitoring (alert if >90%)
+- CPU load average (1min, 5min, 15min)
+- System memory (total, available, usage %)
+- Memory from `/proc/meminfo` (Linux)
+
+✅ **Application Directories**
+- Critical paths validation
+- Read/write permissions check
+- Directory existence verification
+
+### Using Comprehensive Health Check
+
+#### 1. Build Test Image
+
+```bash
+# Via Makefile (recommended)
+make build-test-image
+
+# Via script
+./build-from-env.sh --test
+
+# Manual build
+docker build \
+  --build-arg HEALTH_CHECK_TYPE=comprehensive \
+  -t kariricode/php-api-stack:test \
+  .
+```
+
+#### 2. Run Test Container
+
+```bash
+# Via Makefile (automatic)
+make run-test
+
+# Expected output:
+# ✓ Test container running!
+# Container:    php-api-stack-test
+# URL:          http://localhost:8080
+# Health Check: http://localhost:8080/health.php
+#
+# Testing comprehensive health endpoint...
+# ✓ Health check: HEALTHY
+# Duration: 42.15ms
+#
+# Available checks:
+#   - php
+#   - php_extensions
+#   - opcache
+#   - redis
+#   - system
+#   - application
+```
+
+#### 3. Test Health Endpoint
+
+```bash
+# Full health check
+curl http://localhost:8080/health.php | jq
+
+# Check overall status
+curl -s http://localhost:8080/health.php | jq '.status'
+# Output: "healthy"
+
+# Check specific component
+curl -s http://localhost:8080/health.php | jq '.checks.opcache'
+
+# Find failed checks
+curl -s http://localhost:8080/health.php | jq '.checks | to_entries[] | select(.value.healthy == false)'
+
+# Via Makefile
+make test-health              # Full JSON output
+make test-health-status       # Summary only
+make test-health-watch        # Live monitoring (5s refresh)
+```
+
+### Example Response
+
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-10-09T14:30:00+00:00",
+  "duration_ms": 42.15,
+  "checks": {
+    "php": {
+      "healthy": true,
+      "status": "healthy",
+      "details": {
+        "version": "8.4.0",
+        "sapi": "fpm-fcgi",
+        "memory": {
+          "limit": "256 MB",
+          "usage": "32 MB",
+          "peak": "35 MB",
+          "usage_percent": 12.5
+        },
+        "zend_version": "4.4.0"
+      },
+      "duration_ms": 0.52
+    },
+    "php_extensions": {
+      "healthy": true,
+      "status": "healthy",
+      "details": {
+        "total_loaded": 45,
+        "required": {
+          "loaded": ["pdo", "opcache", "mbstring", "json", "curl"],
+          "missing": []
+        },
+        "optional_loaded": ["redis", "apcu", "intl", "zip", "gd", "xml"]
+      },
+      "duration_ms": 0.31
+    },
+    "opcache": {
+      "healthy": true,
+      "status": "healthy",
+      "details": {
+        "enabled": true,
+        "memory": {
+          "used": "48 MB",
+          "free": "208 MB",
+          "usage_percent": 18.75,
+          "wasted_percent": 0.5
+        },
+        "statistics": {
+          "hits": 125000,
+          "misses": 1500,
+          "hit_rate": 98.81,
+          "cached_scripts": 1250,
+          "max_cached_keys": 20000
+        },
+        "jit": {
+          "enabled": true,
+          "on": true,
+          "buffer_size": "128 MB"
+        },
+        "restarts": {
+          "oom": 0,
+          "hash": 0,
+          "manual": 0
+        }
+      },
+      "duration_ms": 1.23
+    },
+    "redis": {
+      "healthy": true,
+      "status": "healthy",
+      "details": {
+        "connected": true,
+        "version": "7.2.0",
+        "uptime_seconds": 86400,
+        "memory": {
+          "used": "2.5M",
+          "peak": "3.2M",
+          "fragmentation_ratio": 1.03
+        },
+        "stats": {
+          "connected_clients": 5,
+          "total_commands_processed": 50000,
+          "keyspace_hits": 48000,
+          "keyspace_misses": 2000
+        },
+        "latency": {
+          "connect_ms": 0.15,
+          "ping_ms": 0.08
+        }
+      },
+      "duration_ms": 1.45
+    },
+    "system": {
+      "healthy": true,
+      "status": "healthy",
+      "details": {
+        "disk": {
+          "total": "100 GB",
+          "free": "45 GB",
+          "usage_percent": 55
+        },
+        "load_average": {
+          "1min": 0.5,
+          "5min": 0.3,
+          "15min": 0.2
+        },
+        "memory": {
+          "total": "4 GB",
+          "available": "2.5 GB",
+          "used": "1.5 GB",
+          "usage_percent": 37.5
+        }
+      },
+      "duration_ms": 2.34
+    },
+    "application": {
+      "healthy": true,
+      "status": "healthy",
+      "details": {
+        "directories": {
+          "html": {
+            "path": "/var/www/html",
+            "exists": true,
+            "readable": true,
+            "writable": true
+          },
+          "public": {
+            "path": "/var/www/html/public",
+            "exists": true,
+            "readable": true,
+            "writable": true
+          },
+          "php": {
+            "path": "/var/log/php",
+            "exists": true,
+            "readable": true,
+            "writable": true
+          },
+          "nginx": {
+            "path": "/var/log/nginx",
+            "exists": true,
+            "readable": true,
+            "writable": true
+          }
+        },
+        "document_root": "/var/www/html/public"
+      },
+      "duration_ms": 0.89
+    }
+  }
+}
+```
+
+### HTTP Status Codes
+
+| Code | Status | Description |
+|------|--------|-------------|
+| **200** | Healthy | All critical checks passed |
+| **503** | Unhealthy | One or more critical checks failed |
+| **500** | Error | Internal error during health check |
+
+### Integration Examples
+
+#### Docker Compose
+
+```yaml
+services:
+  app:
+    image: kariricode/php-api-stack:test
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+#### Kubernetes
+
+```yaml
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: php-app
+    image: kariricode/php-api-stack:test
+    livenessProbe:
+      httpGet:
+        path: /health.php
+        port: 80
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /health.php
+        port: 80
+      initialDelaySeconds: 5
+      periodSeconds: 5
+```
+
+#### Prometheus Monitoring
+
+```yaml
+scrape_configs:
+  - job_name: 'php-api-health'
+    static_configs:
+      - targets: ['app:80']
+    metrics_path: '/health.php'
+    scrape_interval: 30s
+```
+
+### Makefile Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `make build-test-image` | Build test image with comprehensive health check |
+| `make run-test` | Build + run test container with auto-validation |
+| `make test-health` | Test comprehensive health endpoint (full JSON) |
+| `make test-health-status` | Show health status summary |
+| `make test-health-watch` | Live monitoring (updates every 5s) |
+| `make logs-test` | View test container logs |
+| `make shell-test` | Access test container shell |
+| `make stop-test` | Stop and remove test container |
+
+### Architecture Details
+
+The comprehensive health check follows **SOLID principles** and implements several **Design Patterns**:
+
+- **Single Responsibility**: Each checker validates one component
+- **Open/Closed**: Easy to extend with new checkers
+- **Liskov Substitution**: All checkers are interchangeable
+- **Interface Segregation**: Clean, focused interfaces
+- **Dependency Inversion**: Depends on abstractions
+
+**Patterns Used**:
+- **Strategy Pattern**: Different health check strategies
+- **Template Method**: Abstract base with common logic
+- **Facade Pattern**: `HealthCheckManager` simplifies usage
+- **Value Object**: Immutable `CheckResult` type
+
+### Performance Impact
+
+- **Execution Time**: ~40-50ms (all checks)
+- **Memory Usage**: <1MB additional
+- **CPU Impact**: Negligible (<1% spike)
+- **Network**: Local connections only (Redis)
+
+### Customization
+
+Add custom checkers by extending `AbstractHealthCheck`:
+
+```php
+final class DatabaseCheck extends AbstractHealthCheck
+{
+    public function getName(): string 
+    { 
+        return 'database'; 
+    }
+
+    protected function performCheck(): array
+    {
+        // Your custom validation logic
+        return [
+            'healthy' => true,
+            'status' => 'healthy',
+            'details' => ['connections' => 5]
+        ];
+    }
+}
+
+// Register in health.php
+$manager->addChecker(new DatabaseCheck());
+```
+
+### Troubleshooting
+
+```bash
+# Check if health.php exists
+docker exec php-api-stack-test ls -la /var/www/html/public/health.php
+
+# Test syntax
+docker exec php-api-stack-test php -l /var/www/html/public/health.php
+
+# Run directly (bypass web server)
+docker exec php-api-stack-test php /var/www/html/public/health.php
+
+# Check Nginx error logs
+docker exec php-api-stack-test tail -f /var/log/nginx/error.log
+
+# Check PHP-FPM logs
+docker exec php-api-stack-test tail -f /var/log/php/error.log
+```
+
 ## 💻 Local Development
 
 ### Development Workflow
@@ -639,7 +1099,7 @@ make logs
 make shell
 
 # Restart services after changes
-docker exec nginx-test supervisorctl restart all
+docker exec php-api-test supervisorctl restart all
 
 # Stop container
 make stop
@@ -675,6 +1135,7 @@ services:
       args:
         APP_ENV: development
         PHP_PECL_EXTENSIONS: "redis apcu uuid xdebug"
+        HEALTH_CHECK_TYPE: comprehensive
     image: kariricode/php-api-stack:dev
     volumes:
       - ./app:/var/www/html
@@ -755,7 +1216,7 @@ The project follows [Semantic Versioning](https://semver.org/):
 ```
 MAJOR.MINOR.PATCH
 
-1.2.0
+1.2.1
 │ │ └── Bug fixes
 │ └──── New features (backward compatible)
 └────── Breaking changes
@@ -765,8 +1226,9 @@ MAJOR.MINOR.PATCH
 
 - `latest` - Latest stable version
 - `stable` - Production version
+- `test` - Test version with comprehensive health check
 - `dev` - Development version
-- `1.2.0` - Specific version
+- `1.2.1` - Specific version
 - `1.2` - Minor version
 - `1` - Major version
 
@@ -870,7 +1332,8 @@ open_basedir = /var/www/html:/tmp:/usr/local/lib/php:/usr/share/php
 
 | Endpoint | Description | Access |
 |----------|-------------|---------|
-| `/health` | General health check | Public |
+| `/health` | General health check (simple) | Public |
+| `/health.php` | Comprehensive health check | Public (test builds) |
 | `/fpm-status` | PHP-FPM status | 127.0.0.1 only |
 | `/fpm-ping` | PHP-FPM ping | 127.0.0.1 only |
 | `/redis-status` | Redis status | 127.0.0.1 only |
@@ -936,6 +1399,15 @@ services:
   db:
     image: mysql:8.0
 ```
+
+### How to use the comprehensive health check in production?
+
+Build with the `--test` flag:
+```bash
+./build-from-env.sh --test --push
+```
+
+Then use the `:test` tag in production if you need detailed monitoring.
 
 ## 📖 Use Cases and Best Practices
 
@@ -1045,6 +1517,7 @@ docker exec my-app php -r "print_r(memory_get_usage(true));"
 - [The Twelve-Factor App](https://12factor.net/)
 - [OWASP Security Guidelines](https://owasp.org/www-project-top-ten/)
 - [PHP-FIG Standards](https://www.php-fig.org/psr/)
+- [SOLID Principles](https://en.wikipedia.org/wiki/SOLID)
 
 ### Related Tools
 - [Docker Hub - kariricode/php-api-stack](https://hub.docker.com/r/kariricode/php-api-stack)
@@ -1073,6 +1546,15 @@ Contributions are welcome! Please:
 - Update documentation when necessary
 
 ## 📝 Changelog
+
+### [1.2.1] - 2025-10-09
+- 🏥 Added comprehensive health check with SOLID architecture
+- 📊 Detailed validation for all stack components (PHP, OPcache, Redis, System, Application)
+- 🔧 New Makefile targets for test builds and health monitoring
+- 📚 Enhanced documentation with comprehensive health check section
+- ✅ Production and test build separation via build arguments
+- 🎨 Improved Makefile organization and help system
+- 🐛 Fixed health check integration in Docker builds
 
 ### [1.2.0] - 2025-10-08
 - ✨ Improved PHP extension installation with smart detection

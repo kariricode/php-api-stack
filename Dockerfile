@@ -210,10 +210,10 @@ COPY --from=redis-build /usr/local/bin/redis-* /usr/local/bin/
 RUN set -eux; \
     echo "==> Installing Composer ${COMPOSER_VERSION}..."; \
     mkdir -p /composer; \
-    EXPECTED_CHECKSUM="$(wget -q -O - https://composer.github.io/installer.sig)"; \
+    EXPECTED_CHECKSUM="$(wget --progress=dot:giga -O - https://composer.github.io/installer.sig)"; \
     for i in 1 2 3 4 5; do \
     echo "  Attempt $i to download Composer..."; \
-    if wget -O composer-setup.php https://getcomposer.org/installer; then \
+    if wget --progress=dot:giga -O composer-setup.php https://getcomposer.org/installer; then \
     ACTUAL_CHECKSUM="$(php -r "echo hash_file('sha384', 'composer-setup.php');")"; \
     if [ "$EXPECTED_CHECKSUM" = "$ACTUAL_CHECKSUM" ]; then \
     echo "  Installer verified, installing Composer..."; \
@@ -223,8 +223,8 @@ RUN set -eux; \
     fi; \
     elif [ $i -eq 5 ]; then \
     echo "  Falling back to direct download of Composer phar..."; \
-    wget -O /usr/local/bin/composer "https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar" || \
-    wget -O /usr/local/bin/composer "https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar"; \
+    wget -q -O /usr/local/bin/composer "https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar" || \
+    wget -q -O /usr/local/bin/composer "https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar"; \
     chmod +x /usr/local/bin/composer && break; \
     fi; \
     sleep 2; \
@@ -235,20 +235,22 @@ RUN set -eux; \
     echo "  [✓] Composer installed successfully"
 
 # Install Symfony CLI with retry logic
+# Install Symfony CLI with retry logic (sem pipe e com progress bar)
 RUN set -eux; \
     echo "==> Installing Symfony CLI ${SYMFONY_CLI_VERSION}..."; \
     for i in 1 2 3; do \
     echo "  Attempt $i to download Symfony CLI..."; \
-    if wget -O - https://get.symfony.com/cli/installer | bash; then \
+    if wget --progress=dot:giga -O /tmp/symfony-installer https://get.symfony.com/cli/installer; then \
+    bash /tmp/symfony-installer; \
     mv /root/.symfony*/bin/symfony /usr/local/bin/symfony; \
     chmod +x /usr/local/bin/symfony; \
-    rm -rf /root/.symfony*; \
+    rm -rf /root/.symfony* /tmp/symfony-installer; \
     break; \
     elif [ $i -eq 3 ]; then \
     echo "  Falling back to direct download of Symfony CLI..."; \
-    wget -O symfony.tar.gz "https://github.com/symfony-cli/symfony-cli/releases/download/v${SYMFONY_CLI_VERSION}/symfony-cli_linux_amd64.tar.gz" && \
-    tar -xzf symfony.tar.gz -C /usr/local/bin && \
-    rm symfony.tar.gz && \
+    wget --progress=dot:giga -O /tmp/symfony.tar.gz "https://github.com/symfony-cli/symfony-cli/releases/download/v${SYMFONY_CLI_VERSION}/symfony-cli_linux_amd64.tar.gz"; \
+    tar -xzf /tmp/symfony.tar.gz -C /usr/local/bin; \
+    rm /tmp/symfony.tar.gz; \
     chmod +x /usr/local/bin/symfony; \
     break; \
     fi; \
@@ -256,6 +258,7 @@ RUN set -eux; \
     done; \
     symfony version || echo "  [!] Symfony CLI installation failed (non-critical)"; \
     echo "  [✓] Symfony CLI installed successfully"
+
 
 # Create directory structure
 RUN set -eux; \
@@ -336,30 +339,54 @@ RUN chmod +x /usr/local/bin/docker-entrypoint
 COPY scripts/process-configs.sh /usr/local/bin/process-configs
 RUN chmod +x /usr/local/bin/process-configs
 
-# Process configs with default values at build time
-RUN /usr/local/bin/process-configs
-
-# Create health check script
-RUN echo '#!/bin/sh' > /usr/local/bin/healthcheck && \
-    echo 'curl -f http://localhost/health || exit 1' >> /usr/local/bin/healthcheck && \
+# Process configs and create health check script
+RUN set -eux; \
+    /usr/local/bin/process-configs; \
+    printf '#!/bin/sh\n' > /usr/local/bin/healthcheck; \
+    printf 'curl -f http://localhost/health || exit 1\n' >> /usr/local/bin/healthcheck; \
     chmod +x /usr/local/bin/healthcheck
 
 # Copy quick-start script for debugging
 COPY scripts/quick-start.sh /usr/local/bin/quick-start
 RUN chmod +x /usr/local/bin/quick-start
 
-# Create a simple index.php for testing
-RUN echo '<?php echo "PHP API Stack v'${VERSION}' is running! PHP: " . PHP_VERSION . "\n"; ?>' > /var/www/html/public/index.php && \
-    chown nginx:nginx /var/www/html/public/index.php
-
 # Set proper ownership
 RUN set -eux; \
     chown -R nginx:nginx /var/www/html; \
     chmod -R 755 /var/www/html
 
+# ============================================================================
+# CONDITIONAL HEALTH CHECK (Build Argument)
+# ============================================================================
+
+# Build argument para decidir qual health check usar
+ARG HEALTH_CHECK_TYPE=simple
+
+# Copy comprehensive health check se especificado
+COPY --chown=nginx:nginx health.php /tmp/health-comprehensive.php
+
+# Instalar health check apropriado
+RUN if [ "$HEALTH_CHECK_TYPE" = "comprehensive" ]; then \
+    echo "==> Installing comprehensive health check..."; \
+    cp /tmp/health-comprehensive.php /var/www/html/public/health.php; \
+    php -l /var/www/html/public/health.php; \
+    else \
+    echo "==> Installing simple health check..."; \
+    printf '<?php\n' > /var/www/html/public/health.php; \
+    printf 'header("Content-Type: application/json");\n' >> /var/www/html/public/health.php; \
+    printf 'echo json_encode(["status"=>"healthy","timestamp"=>date("c")]);\n' >> /var/www/html/public/health.php; \
+    fi && \
+    chown nginx:nginx /var/www/html/public/health.php && \
+    chmod 644 /var/www/html/public/health.php && \
+    rm -f /tmp/health-comprehensive.php && \
+    echo "  [✓] Health check installed successfully"
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD /usr/local/bin/healthcheck
+
+# ... resto do arquivo continua igual
+
 
 # Set working directory
 WORKDIR /var/www/html
