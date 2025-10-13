@@ -1,0 +1,95 @@
+stages:
+  - lint
+  - build
+  - test
+  - security
+
+variables:
+  DOCKER_DRIVER: overlay2
+  IMAGE_NAME: kariricode/php-api-stack
+
+lint:dockerfile:
+  stage: lint
+  image: hadolint/hadolint:latest
+  script:
+    - hadolint Dockerfile
+  only:
+    - merge_requests
+    - main
+    - develop
+
+build:production:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - make build
+    - docker save $IMAGE_NAME:latest | gzip > image.tar.gz
+  artifacts:
+    paths:
+      - image.tar.gz
+      - VERSION
+    expire_in: 1 hour
+
+test:quick:
+  stage: test
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - build:production
+  script:
+    - docker load < image.tar.gz
+    - make test-quick
+
+test:full:
+  stage: test
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - build:production
+  script:
+    - docker load < image.tar.gz
+    - make test
+
+test:integration:
+  stage: test
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - build:production
+  script:
+    - docker load < image.tar.gz
+    - make run
+    - sleep 10
+    - curl -f http://localhost:8080
+    - curl -f http://localhost:8080/health
+    - make stop
+
+test:health:
+  stage: test
+  image: docker:latest
+  services:
+    - docker:dind
+  dependencies:
+    - build:production
+  script:
+    - docker load < image.tar.gz
+    - make build-test-image
+    - make run-test
+    - sleep 10
+    - make test-health
+    - make stop-test
+
+security:trivy:
+  stage: security
+  image: aquasec/trivy:latest
+  dependencies:
+    - build:production
+  script:
+    - docker load < image.tar.gz
+    - trivy image --severity HIGH,CRITICAL --exit-code 1 $IMAGE_NAME:latest
+  allow_failure: false

@@ -103,9 +103,6 @@ test-quick: ## Quick test of built image (versions only)
 	@echo ""
 	@echo "$(GREEN)✓ All components verified!$(NC)"
 
-.PHONY: build-test
-build-test: build test-quick ## Build and run quick tests
-
 .PHONY: test
 test: ## Run comprehensive tests on production image
 	@echo "$(GREEN)Running comprehensive tests...$(NC)"

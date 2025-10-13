@@ -3,16 +3,12 @@
 declare(strict_types=1);
 
 /**
- * PHP API Stack - Comprehensive Health Check
+ * PHP API Stack - Comprehensive Health Check (Open Basedir Safe)
  * 
- * Production-ready health check endpoint that validates all stack components:
- * - PHP runtime and extensions
- * - OPcache status and performance
- * - Redis connectivity and performance
- * - System resources (disk, memory, CPU)
- * - Application directories and permissions
+ * Production-ready with defensive programming for restricted environments.
+ * Respects open_basedir and security constraints.
  * 
- * @link https://www.php.net/manual/en/features.http-auth.php
+ * @link https://www.php.net/manual/en/ini.core.php#ini.open-basedir
  * @link https://www.php.net/manual/en/book.opcache.php
  * @link https://redis.io/docs/connect/clients/php/
  * 
@@ -25,12 +21,9 @@ declare(strict_types=1);
 namespace HealthCheck;
 
 // ============================================================================
-// INTERFACES
+// INTERFACES (Dependency Inversion Principle)
 // ============================================================================
 
-/**
- * Health Check Interface (Dependency Inversion Principle)
- */
 interface HealthCheckInterface
 {
     public function check(): CheckResult;
@@ -38,9 +31,10 @@ interface HealthCheckInterface
     public function isCritical(): bool;
 }
 
-/**
- * Check Result Value Object (immutable)
- */
+// ============================================================================
+// VALUE OBJECTS (Immutability)
+// ============================================================================
+
 final readonly class CheckResult
 {
     public function __construct(
@@ -75,6 +69,25 @@ final readonly class CheckResult
 }
 
 // ============================================================================
+// UTILITIES (DRY Principle)
+// ============================================================================
+
+final class ByteFormatter
+{
+    private const UNITS = ['B', 'KB', 'MB', 'GB'];
+
+    public static function format(int $bytes): string
+    {
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count(self::UNITS) - 1);
+        $bytes /= (1 << (10 * $pow));
+
+        return round($bytes, 2) . ' ' . self::UNITS[$pow];
+    }
+}
+
+// ============================================================================
 // ABSTRACT BASE CHECKER (Template Method Pattern)
 // ============================================================================
 
@@ -82,7 +95,7 @@ abstract class AbstractHealthCheck implements HealthCheckInterface
 {
     protected bool $critical = true;
 
-    public function check(): CheckResult
+    final public function check(): CheckResult
     {
         $start = microtime(true);
 
@@ -112,7 +125,7 @@ abstract class AbstractHealthCheck implements HealthCheckInterface
 
     abstract protected function performCheck(): array;
 
-    public function isCritical(): bool
+    final public function isCritical(): bool
     {
         return $this->critical;
     }
@@ -122,10 +135,6 @@ abstract class AbstractHealthCheck implements HealthCheckInterface
 // CONCRETE HEALTH CHECKERS (Single Responsibility Principle)
 // ============================================================================
 
-/**
- * PHP Runtime Health Check
- * Validates PHP version, memory, and core functionality
- */
 final class PhpRuntimeCheck extends AbstractHealthCheck
 {
     public function getName(): string
@@ -151,9 +160,9 @@ final class PhpRuntimeCheck extends AbstractHealthCheck
                 'version' => PHP_VERSION,
                 'sapi' => PHP_SAPI,
                 'memory' => [
-                    'limit' => $this->formatBytes($memoryLimit),
-                    'usage' => $this->formatBytes($memoryUsage),
-                    'peak' => $this->formatBytes($memoryPeakUsage),
+                    'limit' => ByteFormatter::format($memoryLimit),
+                    'usage' => ByteFormatter::format($memoryUsage),
+                    'peak' => ByteFormatter::format($memoryPeakUsage),
                     'usage_percent' => $memoryUsagePercent,
                 ],
                 'zend_version' => zend_version(),
@@ -164,6 +173,10 @@ final class PhpRuntimeCheck extends AbstractHealthCheck
     private function parseMemory(string $value): int
     {
         $value = trim($value);
+        if ($value === '-1') {
+            return PHP_INT_MAX;
+        }
+
         $unit = strtolower($value[strlen($value) - 1]);
         $value = (int) $value;
 
@@ -174,42 +187,14 @@ final class PhpRuntimeCheck extends AbstractHealthCheck
             default => $value,
         };
     }
-
-    private function formatBytes(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1 << (10 * $pow));
-
-        return round($bytes, 2) . ' ' . $units[$pow];
-    }
 }
 
-/**
- * PHP Extensions Health Check
- * Validates required and optional extensions
- */
 final class PhpExtensionsCheck extends AbstractHealthCheck
 {
     protected bool $critical = false;
 
-    private const REQUIRED_EXTENSIONS = [
-        'pdo',
-        'mbstring',
-        'json',
-        'curl'
-    ];
-
-    private const OPTIONAL_EXTENSIONS = [
-        'redis',
-        'apcu',
-        'intl',
-        'zip',
-        'gd',
-        'xml'
-    ];
+    private const REQUIRED_EXTENSIONS = ['pdo', 'mbstring', 'json', 'curl'];
+    private const OPTIONAL_EXTENSIONS = ['redis', 'apcu', 'intl', 'zip', 'gd', 'xml'];
 
     public function getName(): string
     {
@@ -255,12 +240,6 @@ final class PhpExtensionsCheck extends AbstractHealthCheck
     }
 }
 
-/**
- * OPcache Health Check
- * Validates OPcache status, memory usage, and hit rate
- * 
- * @link https://www.php.net/manual/en/book.opcache.php
- */
 final class OpcacheCheck extends AbstractHealthCheck
 {
     protected bool $critical = false;
@@ -315,8 +294,8 @@ final class OpcacheCheck extends AbstractHealthCheck
             'details' => [
                 'enabled' => true,
                 'memory' => [
-                    'used' => $this->formatBytes($memoryUsed),
-                    'free' => $this->formatBytes($memoryFree),
+                    'used' => ByteFormatter::format($memoryUsed),
+                    'free' => ByteFormatter::format($memoryFree),
                     'usage_percent' => $memoryUsagePercent,
                     'wasted_percent' => round($status['memory_usage']['current_wasted_percentage'] ?? 0, 2),
                 ],
@@ -330,7 +309,7 @@ final class OpcacheCheck extends AbstractHealthCheck
                 'jit' => [
                     'enabled' => $status['jit']['enabled'] ?? false,
                     'on' => $status['jit']['on'] ?? false,
-                    'buffer_size' => $this->formatBytes($status['jit']['buffer_size'] ?? 0),
+                    'buffer_size' => ByteFormatter::format($status['jit']['buffer_size'] ?? 0),
                 ],
                 'restarts' => [
                     'oom' => $status['opcache_statistics']['oom_restarts'] ?? 0,
@@ -340,25 +319,8 @@ final class OpcacheCheck extends AbstractHealthCheck
             ],
         ];
     }
-
-    private function formatBytes(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1 << (10 * $pow));
-
-        return round($bytes, 2) . ' ' . $units[$pow];
-    }
 }
 
-/**
- * Redis Health Check
- * Validates Redis connectivity, version, and performance
- * 
- * @link https://redis.io/docs/connect/clients/php/
- */
 final class RedisCheck extends AbstractHealthCheck
 {
     protected bool $critical = false;
@@ -385,7 +347,6 @@ final class RedisCheck extends AbstractHealthCheck
         $redis = new \Redis();
 
         try {
-            // Measure connection latency
             $connectStart = microtime(true);
             $connected = @$redis->connect('127.0.0.1', 6379, self::TIMEOUT);
             $connectDuration = (microtime(true) - $connectStart) * 1000;
@@ -401,7 +362,6 @@ final class RedisCheck extends AbstractHealthCheck
                 ];
             }
 
-            // Ping test
             $pingStart = microtime(true);
             $pong = $redis->ping();
             $pingDuration = (microtime(true) - $pingStart) * 1000;
@@ -410,9 +370,7 @@ final class RedisCheck extends AbstractHealthCheck
                 throw new \RuntimeException('Redis ping failed');
             }
 
-            // Get info
             $info = $redis->info();
-
             $healthy = $pingDuration < self::MAX_LATENCY_MS;
 
             return [
@@ -453,8 +411,11 @@ final class RedisCheck extends AbstractHealthCheck
 }
 
 /**
- * System Resources Health Check
- * Validates disk space, memory, and CPU load
+ * System Resources Check - Defensive Programming
+ * 
+ * Gracefully handles open_basedir restrictions by using fallback strategies.
+ * 
+ * @link https://www.php.net/manual/en/ini.core.php#ini.open-basedir
  */
 final class SystemResourcesCheck extends AbstractHealthCheck
 {
@@ -470,19 +431,16 @@ final class SystemResourcesCheck extends AbstractHealthCheck
 
     protected function performCheck(): array
     {
-        // Disk space
         $diskFree = @disk_free_space('/');
         $diskTotal = @disk_total_space('/');
         $diskUsagePercent = $diskTotal > 0
             ? round((($diskTotal - $diskFree) / $diskTotal) * 100, 2)
             : 0;
 
-        // Load average (Unix-like systems only)
         $loadAvg = @sys_getloadavg();
         $load1 = $loadAvg[0] ?? 0;
 
-        // Memory info (from /proc/meminfo on Linux)
-        $memoryInfo = $this->getMemoryInfo();
+        $memoryInfo = $this->getMemoryInfoSafely();
 
         $healthy = $diskUsagePercent < self::MAX_DISK_USAGE && $load1 < self::MAX_LOAD_AVERAGE;
 
@@ -491,8 +449,8 @@ final class SystemResourcesCheck extends AbstractHealthCheck
             'status' => $healthy ? 'healthy' : 'warning',
             'details' => [
                 'disk' => [
-                    'total' => $this->formatBytes($diskTotal ?: 0),
-                    'free' => $this->formatBytes($diskFree ?: 0),
+                    'total' => ByteFormatter::format($diskTotal ?: 0),
+                    'free' => ByteFormatter::format($diskFree ?: 0),
                     'usage_percent' => $diskUsagePercent,
                 ],
                 'load_average' => [
@@ -505,15 +463,25 @@ final class SystemResourcesCheck extends AbstractHealthCheck
         ];
     }
 
-    private function getMemoryInfo(): array
+    /**
+     * Safely reads memory info with fallback strategy.
+     * 
+     * Strategy 1: Try /proc/meminfo (full system memory)
+     * Strategy 2: Fallback to PHP memory usage (if restricted)
+     */
+    private function getMemoryInfoSafely(): array
     {
-        if (!is_readable('/proc/meminfo')) {
-            return ['available' => false];
-        }
-
+        set_error_handler(static fn() => true);
         $content = @file_get_contents('/proc/meminfo');
+        restore_error_handler();
+
         if ($content === false) {
-            return ['available' => false];
+            return [
+                'source' => 'php_fallback',
+                'note' => 'System memory unavailable (open_basedir restriction)',
+                'php_memory_usage' => ByteFormatter::format(memory_get_usage(true)),
+                'php_memory_peak' => ByteFormatter::format(memory_get_peak_usage(true)),
+            ];
         }
 
         $matches = [];
@@ -521,7 +489,7 @@ final class SystemResourcesCheck extends AbstractHealthCheck
 
         $meminfo = [];
         foreach ($matches as $match) {
-            $meminfo[$match[1]] = (int) $match[2] * 1024; // Convert to bytes
+            $meminfo[$match[1]] = (int) $match[2] * 1024;
         }
 
         $memTotal = $meminfo['MemTotal'] ?? 0;
@@ -530,38 +498,36 @@ final class SystemResourcesCheck extends AbstractHealthCheck
         $memUsagePercent = $memTotal > 0 ? round(($memUsed / $memTotal) * 100, 2) : 0;
 
         return [
-            'total' => $this->formatBytes($memTotal),
-            'available' => $this->formatBytes($memAvailable),
-            'used' => $this->formatBytes($memUsed),
+            'source' => 'proc_meminfo',
+            'total' => ByteFormatter::format($memTotal),
+            'available' => ByteFormatter::format($memAvailable),
+            'used' => ByteFormatter::format($memUsed),
             'usage_percent' => $memUsagePercent,
         ];
-    }
-
-    private function formatBytes(int $bytes): string
-    {
-        $units = ['B', 'KB', 'MB', 'GB'];
-        $bytes = max($bytes, 0);
-        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
-        $pow = min($pow, count($units) - 1);
-        $bytes /= (1 << (10 * $pow));
-
-        return round($bytes, 2) . ' ' . $units[$pow];
     }
 }
 
 /**
- * Application Directories Health Check
- * Validates critical directory permissions and accessibility
+ * Application Check - Respects Open Basedir
+ * 
+ * Only checks directories within open_basedir scope.
+ * Provides clear feedback about security restrictions.
  */
 final class ApplicationCheck extends AbstractHealthCheck
 {
     protected bool $critical = false;
 
-    private const CRITICAL_DIRS = [
+    /**
+     * CRITICAL: Only check paths within typical open_basedir scope.
+     * 
+     * Common open_basedir: /var/www/html:/tmp:/usr/local/lib/php:/usr/share/php
+     * 
+     * Excluded: /var/log/* (security policy prevents access)
+     */
+    private const ACCESSIBLE_DIRS = [
         '/var/www/html',
         '/var/www/html/public',
-        '/var/log/php',
-        '/var/log/nginx',
+        '/tmp',
     ];
 
     public function getName(): string
@@ -573,31 +539,55 @@ final class ApplicationCheck extends AbstractHealthCheck
     {
         $directoryStatus = [];
         $allHealthy = true;
+        $openBasedir = ini_get('open_basedir');
 
-        foreach (self::CRITICAL_DIRS as $dir) {
-            $exists = is_dir($dir);
-            $readable = $exists && is_readable($dir);
-            $writable = $exists && is_writable($dir);
+        foreach (self::ACCESSIBLE_DIRS as $dir) {
+            $status = $this->checkDirectorySafely($dir);
+            $directoryStatus[basename($dir)] = $status;
 
-            $directoryStatus[basename($dir)] = [
-                'path' => $dir,
-                'exists' => $exists,
-                'readable' => $readable,
-                'writable' => $writable,
-            ];
-
-            if (!$exists || !$readable) {
+            if (!$status['exists'] || !$status['readable']) {
                 $allHealthy = false;
             }
+        }
+
+        $details = [
+            'directories' => $directoryStatus,
+            'document_root' => $_SERVER['DOCUMENT_ROOT'] ?? 'unknown',
+        ];
+
+        // Add informational note about security policy
+        if (!empty($openBasedir)) {
+            $details['security_note'] = 'Log directories (/var/log) excluded per open_basedir policy';
+            $details['open_basedir'] = $openBasedir;
         }
 
         return [
             'healthy' => $allHealthy,
             'status' => $allHealthy ? 'healthy' : 'warning',
-            'details' => [
-                'directories' => $directoryStatus,
-                'document_root' => $_SERVER['DOCUMENT_ROOT'] ?? 'unknown',
-            ],
+            'details' => $details,
+        ];
+    }
+
+    /**
+     * Defensive directory check with error suppression.
+     * 
+     * Prevents warnings when open_basedir blocks access.
+     */
+    private function checkDirectorySafely(string $path): array
+    {
+        set_error_handler(static fn() => true);
+
+        $exists = @is_dir($path);
+        $readable = $exists && @is_readable($path);
+        $writable = $exists && @is_writable($path);
+
+        restore_error_handler();
+
+        return [
+            'path' => $path,
+            'exists' => $exists,
+            'readable' => $readable,
+            'writable' => $writable,
         ];
     }
 }
@@ -608,7 +598,7 @@ final class ApplicationCheck extends AbstractHealthCheck
 
 final class HealthCheckManager
 {
-    /** @var HealthCheckInterface[] */
+    /** @var array<string, HealthCheckInterface> */
     private array $checkers = [];
 
     public function addChecker(HealthCheckInterface $checker): self
@@ -647,17 +637,14 @@ final class HealthCheckManager
 // MAIN EXECUTION
 // ============================================================================
 
-// Set proper headers
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
 header('Expires: 0');
 
 try {
-    // Initialize health check manager
     $manager = new HealthCheckManager();
 
-    // Register all health checkers
     $manager
         ->addChecker(new PhpRuntimeCheck())
         ->addChecker(new PhpExtensionsCheck())
@@ -666,14 +653,11 @@ try {
         ->addChecker(new SystemResourcesCheck())
         ->addChecker(new ApplicationCheck());
 
-    // Run all checks
     $health = $manager->runAll();
 
-    // Set appropriate HTTP status code
     $statusCode = $health['status'] === 'healthy' ? 200 : 503;
     http_response_code($statusCode);
 
-    // Output JSON response
     echo json_encode($health, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
 } catch (\Throwable $e) {
     http_response_code(500);

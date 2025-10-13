@@ -1,0 +1,124 @@
+name: Test PHP API Stack
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main]
+    workflow_dispatch:
+
+jobs:
+    lint:
+        name: Lint Dockerfile
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Run hadolint
+              run: make lint
+
+    build:
+        name: Build Image
+        needs: lint
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Build production image
+              run: make build
+
+            - name: Quick component tests
+              run: make test-quick
+
+            - name: Save image
+              run: docker save kariricode/php-api-stack:latest | gzip > image.tar.gz
+
+            - name: Upload artifact
+              uses: actions/upload-artifact@v3
+              with:
+                  name: docker-image
+                  path: image.tar.gz
+
+    test:
+        name: Run Tests
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Download image
+              uses: actions/download-artifact@v3
+              with:
+                  name: docker-image
+
+            - name: Load image
+              run: docker load < image.tar.gz
+
+            - name: Run comprehensive tests
+              run: make test
+
+            - name: Run integration tests
+              run: |
+                  make run
+                  sleep 10
+                  curl -f http://localhost:8080
+                  curl -f http://localhost:8080/health
+                  make stop
+
+    test-health:
+        name: Test Health Checks
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Download image
+              uses: actions/download-artifact@v3
+              with:
+                  name: docker-image
+
+            - name: Load image
+              run: docker load < image.tar.gz
+
+            - name: Build test image
+              run: make build-test-image
+
+            - name: Run test container
+              run: make run-test
+
+            - name: Test comprehensive health check
+              run: |
+                  sleep 10
+                  make test-health
+                  curl -s http://localhost:8080/health.php | jq '.status' | grep -q "healthy"
+
+            - name: Stop test container
+              run: make stop-test
+
+    security:
+        name: Security Scan
+        needs: build
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Download image
+              uses: actions/download-artifact@v3
+              with:
+                  name: docker-image
+
+            - name: Load image
+              run: docker load < image.tar.gz
+
+            - name: Run Trivy scan
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: "kariricode/php-api-stack:latest"
+                  format: "sarif"
+                  output: "trivy-results.sarif"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Upload Trivy results
+              uses: github/codeql-action/upload-sarif@v2
+              with:
+                  sarif_file: "trivy-results.sarif"

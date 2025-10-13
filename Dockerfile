@@ -17,6 +17,10 @@ FROM nginx:${NGINX_VERSION}-alpine AS nginx-build
 # Stage 3: Main application
 FROM php:${PHP_VERSION}-fpm-alpine AS base
 
+# Set shell with pipefail for robust error handling
+# Reference: https://docs.docker.com/engine/reference/builder/#shell
+SHELL ["/bin/ash", "-o", "pipefail", "-c"]
+
 # Import build arguments
 ARG PHP_VERSION
 ARG NGINX_VERSION
@@ -55,6 +59,9 @@ ENV COMPOSER_ALLOW_SUPERUSER=1 \
     STACK_VERSION=${VERSION}
 
 # Install system dependencies
+# Note: Not pinning apk versions for base system packages ensures compatibility
+# with the underlying Alpine version and receives security updates automatically
+# hadolint ignore=DL3018
 RUN set -eux; \
     apk update; \
     apk add --no-cache \
@@ -100,6 +107,8 @@ RUN set -eux; \
     fi; \
     echo "Nginx user:"; id nginx; \
     echo "Redis user:"; id redis; \
+    # PHPIZE_DEPS must be unquoted to allow word splitting (intentional SC2086)
+    # shellcheck disable=SC2086
     apk add --no-cache --virtual .build-deps \
     $PHPIZE_DEPS \
     icu-dev \
@@ -115,37 +124,34 @@ RUN set -eux; \
     rm -rf /var/cache/apk/*
 
 # Install PHP Core Extensions with improved error handling
+# Reference: https://github.com/docker-library/docs/tree/master/php#how-to-install-more-php-extensions
 RUN set -eux; \
     echo "==> Processing PHP Core Extensions..."; \
-    # Map of valid extensions that can be installed
-    # Extensions that are built-in or don't need installation: tokenizer, filter, json, phar, posix, fileinfo, ctype, iconv, session
     INSTALLABLE_EXTENSIONS=""; \
-    for ext in $PHP_CORE_EXTENSIONS; do \
+    for ext in ${PHP_CORE_EXTENSIONS}; do \
     case "$ext" in \
-    # Valid extensions that need installation
     pdo|pdo_mysql|pdo_pgsql|opcache|intl|zip|bcmath|gd|mysqli|mbstring|xml|dom|simplexml|sockets|pcntl|exif) \
     echo "  [✓] Adding $ext to installation list"; \
     INSTALLABLE_EXTENSIONS="$INSTALLABLE_EXTENSIONS $ext" \
     ;; \
-    # Built-in extensions (skip with info)
     tokenizer|filter|json|phar|posix|fileinfo|ctype|iconv|session|curl) \
     echo "  [i] $ext is built-in, skipping installation" \
     ;; \
-    # Unknown extension (skip with warning)
     *) \
     echo "  [!] Warning: Unknown extension '$ext', skipping" \
     ;; \
     esac; \
     done; \
     # Configure GD if present
-    if echo " $INSTALLABLE_EXTENSIONS " | grep -q " gd "; then \
+    if echo " ${INSTALLABLE_EXTENSIONS} " | grep -q " gd "; then \
     echo "==> Configuring GD with FreeType and JPEG support..."; \
     docker-php-ext-configure gd --with-freetype --with-jpeg; \
     fi; \
-    # Install extensions if any
-    if [ -n "$INSTALLABLE_EXTENSIONS" ]; then \
-    echo "==> Installing PHP extensions:$INSTALLABLE_EXTENSIONS"; \
-    docker-php-ext-install -j$(nproc) $INSTALLABLE_EXTENSIONS; \
+    # Install extensions if any (intentional word splitting)
+    if [ -n "${INSTALLABLE_EXTENSIONS}" ]; then \
+    echo "==> Installing PHP extensions: ${INSTALLABLE_EXTENSIONS}"; \
+    # shellcheck disable=SC2086
+    docker-php-ext-install -j"$(nproc)" ${INSTALLABLE_EXTENSIONS}; \
     echo "==> Verifying installed extensions..."; \
     php -m; \
     else \
@@ -153,16 +159,18 @@ RUN set -eux; \
     fi
 
 # Install PECL Extensions with improved error handling
+# Reference: https://pecl.php.net/
+# Note: PECL extension dependencies require latest versions for compatibility
+# hadolint ignore=DL3018
 RUN set -eux; \
     echo "==> Processing PECL Extensions..."; \
-    if [ -n "$PHP_PECL_EXTENSIONS" ]; then \
+    if [ -n "${PHP_PECL_EXTENSIONS}" ]; then \
     INSTALLABLE_PECL=""; \
-    for ext in $PHP_PECL_EXTENSIONS; do \
+    for ext in ${PHP_PECL_EXTENSIONS}; do \
     case "$ext" in \
     redis|apcu|uuid|xdebug|imagick|amqp|swoole) \
     echo "  [✓] Adding PECL extension: $ext"; \
     INSTALLABLE_PECL="$INSTALLABLE_PECL $ext"; \
-    # Install system dependencies for specific extensions
     case "$ext" in \
     uuid) apk add --no-cache util-linux-dev ;; \
     imagick) apk add --no-cache imagemagick-dev ;; \
@@ -174,12 +182,14 @@ RUN set -eux; \
     ;; \
     esac; \
     done; \
-    if [ -n "$INSTALLABLE_PECL" ]; then \
-    echo "==> Installing PECL extensions:$INSTALLABLE_PECL"; \
-    for ext in $INSTALLABLE_PECL; do \
+    if [ -n "${INSTALLABLE_PECL}" ]; then \
+    echo "==> Installing PECL extensions: ${INSTALLABLE_PECL}"; \
+    # Intentional word splitting for loop iteration
+    # shellcheck disable=SC2086
+    for ext in ${INSTALLABLE_PECL}; do \
     echo "  --> Installing $ext..."; \
-    if pecl install $ext; then \
-    docker-php-ext-enable $ext; \
+    if pecl install "$ext"; then \
+    docker-php-ext-enable "$ext"; \
     echo "  [✓] $ext installed successfully"; \
     else \
     echo "  [✗] Failed to install $ext (non-fatal)"; \
@@ -206,7 +216,8 @@ COPY --from=nginx-build /etc/nginx/uwsgi_params /etc/nginx/uwsgi_params
 # Copy Redis binaries from redis image
 COPY --from=redis-build /usr/local/bin/redis-* /usr/local/bin/
 
-# Install Composer with retry logic and multiple fallback methods
+# Install Composer with retry logic and checksum verification
+# Reference: https://getcomposer.org/doc/faqs/how-to-install-composer-programmatically.md
 RUN set -eux; \
     echo "==> Installing Composer ${COMPOSER_VERSION}..."; \
     mkdir -p /composer; \
@@ -217,11 +228,11 @@ RUN set -eux; \
     ACTUAL_CHECKSUM="$(php -r "echo hash_file('sha384', 'composer-setup.php');")"; \
     if [ "$EXPECTED_CHECKSUM" = "$ACTUAL_CHECKSUM" ]; then \
     echo "  Installer verified, installing Composer..."; \
-    php composer-setup.php --install-dir=/usr/local/bin --filename=composer --version=${COMPOSER_VERSION} && break; \
+    php composer-setup.php --install-dir=/usr/local/bin --filename=composer --version="${COMPOSER_VERSION}" && break; \
     else \
     echo "  ERROR: Invalid Composer installer signature"; \
     fi; \
-    elif [ $i -eq 5 ]; then \
+    elif [ "$i" -eq 5 ]; then \
     echo "  Falling back to direct download of Composer phar..."; \
     wget -q -O /usr/local/bin/composer "https://github.com/composer/composer/releases/download/${COMPOSER_VERSION}/composer.phar" || \
     wget -q -O /usr/local/bin/composer "https://getcomposer.org/download/${COMPOSER_VERSION}/composer.phar"; \
@@ -235,7 +246,7 @@ RUN set -eux; \
     echo "  [✓] Composer installed successfully"
 
 # Install Symfony CLI with retry logic
-# Install Symfony CLI with retry logic (sem pipe e com progress bar)
+# Reference: https://symfony.com/download
 RUN set -eux; \
     echo "==> Installing Symfony CLI ${SYMFONY_CLI_VERSION}..."; \
     for i in 1 2 3; do \
@@ -246,7 +257,7 @@ RUN set -eux; \
     chmod +x /usr/local/bin/symfony; \
     rm -rf /root/.symfony* /tmp/symfony-installer; \
     break; \
-    elif [ $i -eq 3 ]; then \
+    elif [ "$i" -eq 3 ]; then \
     echo "  Falling back to direct download of Symfony CLI..."; \
     wget --progress=dot:giga -O /tmp/symfony.tar.gz "https://github.com/symfony-cli/symfony-cli/releases/download/v${SYMFONY_CLI_VERSION}/symfony-cli_linux_amd64.tar.gz"; \
     tar -xzf /tmp/symfony.tar.gz -C /usr/local/bin; \
@@ -259,8 +270,8 @@ RUN set -eux; \
     symfony version || echo "  [!] Symfony CLI installation failed (non-critical)"; \
     echo "  [✓] Symfony CLI installed successfully"
 
-
-# Create directory structure
+# Create directory structure with proper permissions
+# Following the Principle of Least Privilege
 RUN set -eux; \
     mkdir -p \
     /var/www/html/public \
@@ -300,17 +311,22 @@ RUN set -eux; \
     chmod -R 755 /var/log; \
     chmod 755 /var/run
 
-# Ensure PHP-FPM uses Unix socket (override any default config)
-RUN mkdir -p /var/run/php && \
-    chown nginx:nginx /var/run/php && \
-    echo '[www]' > /usr/local/etc/php-fpm.d/zzz-socket-override.conf && \
-    echo 'listen = /var/run/php/php-fpm.sock' >> /usr/local/etc/php-fpm.d/zzz-socket-override.conf && \
-    echo 'listen.owner = nginx' >> /usr/local/etc/php-fpm.d/zzz-socket-override.conf && \
-    echo 'listen.group = nginx' >> /usr/local/etc/php-fpm.d/zzz-socket-override.conf && \
-    echo 'listen.mode = 0660' >> /usr/local/etc/php-fpm.d/zzz-socket-override.conf && \
-    echo 'listen.backlog = 511' >> /usr/local/etc/php-fpm.d/zzz-socket-override.conf
+# Configure PHP-FPM to use Unix socket for optimal performance
+# Reference: https://www.php.net/manual/en/install.fpm.configuration.php
+RUN set -eux; \
+    mkdir -p /var/run/php; \
+    chown nginx:nginx /var/run/php; \
+    { \
+    echo '[www]'; \
+    echo 'listen = /var/run/php/php-fpm.sock'; \
+    echo 'listen.owner = nginx'; \
+    echo 'listen.group = nginx'; \
+    echo 'listen.mode = 0660'; \
+    echo 'listen.backlog = 511'; \
+    } > /usr/local/etc/php-fpm.d/zzz-socket-override.conf
 
-# Clean up build dependencies
+# Clean up build dependencies to reduce image size
+# Reference: https://docs.docker.com/develop/develop-images/dockerfile_best-practices/#minimize-the-number-of-layers
 RUN set -eux; \
     apk del --no-cache .build-deps; \
     rm -rf /tmp/* /var/tmp/* /usr/share/doc/* /usr/share/man/*; \
@@ -342,8 +358,10 @@ RUN chmod +x /usr/local/bin/process-configs
 # Process configs and create health check script
 RUN set -eux; \
     /usr/local/bin/process-configs; \
-    printf '#!/bin/sh\n' > /usr/local/bin/healthcheck; \
-    printf 'curl -f http://localhost/health || exit 1\n' >> /usr/local/bin/healthcheck; \
+    { \
+    printf '#!/bin/sh\n'; \
+    printf 'curl -f http://localhost/health || exit 1\n'; \
+    } > /usr/local/bin/healthcheck; \
     chmod +x /usr/local/bin/healthcheck
 
 # Copy quick-start script for debugging
@@ -357,15 +375,10 @@ RUN set -eux; \
 
 # ============================================================================
 # CONDITIONAL HEALTH CHECK (Build Argument)
+# Allows switching between simple and comprehensive health checks
 # ============================================================================
 
-# Build argument para decidir qual health check usar
 ARG HEALTH_CHECK_TYPE=simple
-
-# Copy demo index.php and health check templates to shared directory
-# ============================================================================
-# TEMPLATES AND DEMO FILES
-# ============================================================================
 
 # Create templates directory
 RUN mkdir -p /usr/local/share/php-api-stack
@@ -382,29 +395,30 @@ RUN set -eux; \
     php -l /usr/local/share/php-api-stack/health.php; \
     else \
     echo "==> Installing simple health check template..."; \
-    printf '<?php\n' > /usr/local/share/php-api-stack/health.php; \
-    printf 'header("Content-Type: application/json");\n' >> /usr/local/share/php-api-stack/health.php; \
-    printf 'echo json_encode(["status"=>"healthy","timestamp"=>date("c")]);\n' >> /usr/local/share/php-api-stack/health.php; \
-    fi && \
-    php -l /usr/local/share/php-api-stack/index.php && \
+    { \
+    printf '<?php\n'; \
+    printf 'header("Content-Type: application/json");\n'; \
+    printf 'echo json_encode(["status"=>"healthy","timestamp"=>date("c")]);\n'; \
+    } > /usr/local/share/php-api-stack/health.php; \
+    fi; \
+    php -l /usr/local/share/php-api-stack/index.php; \
     echo "  [✓] Templates validated and ready"
 
-# Health check
+# Health check configuration
+# Reference: https://docs.docker.com/engine/reference/builder/#healthcheck
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD /usr/local/bin/healthcheck
-
-# ... resto do arquivo continua igual
-
 
 # Set working directory
 WORKDIR /var/www/html
 
-# Expose ports
+# Expose HTTP and HTTPS ports
 EXPOSE 80 443
 
-# Volumes
+# Define volumes for persistence
 VOLUME ["/var/www/html", "/var/log", "/var/lib/redis"]
 
-# Use tini as init system
+# Use tini as init system for proper signal handling
+# Reference: https://github.com/krallin/tini
 ENTRYPOINT ["/sbin/tini", "--", "docker-entrypoint"]
 CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
