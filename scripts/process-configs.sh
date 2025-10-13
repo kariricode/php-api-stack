@@ -13,7 +13,6 @@ export PHP_FPM_PM_STATUS_PATH=${PHP_FPM_PM_STATUS_PATH:-/status}
 export PHP_FPM_PING_PATH=${PHP_FPM_PING_PATH:-/ping}
 export PHP_FPM_ACCESS_LOG=${PHP_FPM_ACCESS_LOG:-/var/log/php/fpm-access.log}
 export PHP_FPM_SLOW_LOG=${PHP_FPM_SLOW_LOG:-/var/log/php/fpm-slow.log}
-export PHP_FPM_REQUEST_SLOWLOG_TIMEOUT=${PHP_FPM_REQUEST_SLOWLOG_TIMEOUT:-30s}
 export PHP_MEMORY_LIMIT=${PHP_MEMORY_LIMIT:-256M}
 export PHP_UPLOAD_MAX_FILESIZE=${PHP_UPLOAD_MAX_FILESIZE:-100M}
 export PHP_POST_MAX_SIZE=${PHP_POST_MAX_SIZE:-100M}
@@ -32,10 +31,21 @@ export PHP_OPCACHE_VALIDATE_TIMESTAMPS=${PHP_OPCACHE_VALIDATE_TIMESTAMPS:-0}
 export PHP_OPCACHE_REVALIDATE_FREQ=${PHP_OPCACHE_REVALIDATE_FREQ:-0}
 export PHP_OPCACHE_JIT=${PHP_OPCACHE_JIT:-tracing}
 export PHP_OPCACHE_JIT_BUFFER_SIZE=${PHP_OPCACHE_JIT_BUFFER_SIZE:-128M}
+export PHP_FPM_REQUEST_SLOWLOG_TIMEOUT=${PHP_FPM_REQUEST_SLOWLOG_TIMEOUT:-30s}
+
 export XDEBUG_MODE=${XDEBUG_MODE:-off}
 export XDEBUG_HOST=${XDEBUG_HOST:-host.docker.internal}
 export XDEBUG_PORT=${XDEBUG_PORT:-9003}
 export XDEBUG_IDE_KEY=${XDEBUG_IDE_KEY:-PHPSTORM}
+
+export NGINX_WORKER_PROCESSES=${NGINX_WORKER_PROCESSES:-auto}
+export NGINX_WORKER_CONNECTIONS=${NGINX_WORKER_CONNECTIONS:-2048}
+export NGINX_KEEPALIVE_TIMEOUT=${NGINX_KEEPALIVE_TIMEOUT:-65}
+export NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-100M}
+export NGINX_GZIP=${NGINX_GZIP:-on}
+export NGINX_GZIP_COMP_LEVEL=${NGINX_GZIP_COMP_LEVEL:-6}
+export NGINX_ACCESS_LOG=${NGINX_ACCESS_LOG:-/var/log/nginx/access.log}
+export NGINX_ERROR_LOG=${NGINX_ERROR_LOG:-/var/log/nginx/error.log}
 
 # Create a list of variables for envsubst to process
 VARS_TO_SUBSTITUTE='
@@ -72,7 +82,28 @@ $XDEBUG_MODE
 $XDEBUG_HOST
 $XDEBUG_PORT
 $XDEBUG_IDE_KEY
+$NGINX_WORKER_PROCESSES
+$NGINX_WORKER_CONNECTIONS
+$NGINX_KEEPALIVE_TIMEOUT
+$NGINX_CLIENT_MAX_BODY_SIZE
+$NGINX_GZIP
+$NGINX_GZIP_COMP_LEVEL
+$NGINX_ACCESS_LOG
+$NGINX_ERROR_LOG
 '
+
+
+echo "Ensuring log directories exist and have correct permissions for validation..."
+
+# Create log directories
+mkdir -p /var/log/php /var/log/nginx /var/log/redis /var/log/supervisor /var/log/symfony /var/run/php /var/run/nginx
+
+# Define permissions
+chown -R nginx:nginx /var/log/php /var/log/nginx /var/log/symfony /var/run/php /var/run/nginx
+chown -R redis:redis /var/log/redis || true
+chown -R root:root /var/log/supervisor
+
+echo "  ✓ Log directories created and permissions set"
 
 echo "Processing configuration templates..."
 

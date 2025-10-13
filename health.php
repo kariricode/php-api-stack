@@ -197,7 +197,6 @@ final class PhpExtensionsCheck extends AbstractHealthCheck
 
     private const REQUIRED_EXTENSIONS = [
         'pdo',
-        'opcache',
         'mbstring',
         'json',
         'curl'

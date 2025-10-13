@@ -362,24 +362,32 @@ RUN set -eux; \
 # Build argument para decidir qual health check usar
 ARG HEALTH_CHECK_TYPE=simple
 
-# Copy comprehensive health check se especificado
-COPY --chown=nginx:nginx health.php /tmp/health-comprehensive.php
+# Copy demo index.php and health check templates to shared directory
+# ============================================================================
+# TEMPLATES AND DEMO FILES
+# ============================================================================
 
-# Instalar health check apropriado
-RUN if [ "$HEALTH_CHECK_TYPE" = "comprehensive" ]; then \
-    echo "==> Installing comprehensive health check..."; \
-    cp /tmp/health-comprehensive.php /var/www/html/public/health.php; \
-    php -l /var/www/html/public/health.php; \
+# Create templates directory
+RUN mkdir -p /usr/local/share/php-api-stack
+
+# Copy demo index.php and health check templates
+COPY --chown=nginx:nginx index.php /usr/local/share/php-api-stack/index.php
+COPY --chown=nginx:nginx health.php /usr/local/share/php-api-stack/health-comprehensive.php
+
+# Install appropriate health check template based on build type
+RUN set -eux; \
+    if [ "$HEALTH_CHECK_TYPE" = "comprehensive" ]; then \
+    echo "==> Installing comprehensive health check template..."; \
+    cp /usr/local/share/php-api-stack/health-comprehensive.php /usr/local/share/php-api-stack/health.php; \
+    php -l /usr/local/share/php-api-stack/health.php; \
     else \
-    echo "==> Installing simple health check..."; \
-    printf '<?php\n' > /var/www/html/public/health.php; \
-    printf 'header("Content-Type: application/json");\n' >> /var/www/html/public/health.php; \
-    printf 'echo json_encode(["status"=>"healthy","timestamp"=>date("c")]);\n' >> /var/www/html/public/health.php; \
+    echo "==> Installing simple health check template..."; \
+    printf '<?php\n' > /usr/local/share/php-api-stack/health.php; \
+    printf 'header("Content-Type: application/json");\n' >> /usr/local/share/php-api-stack/health.php; \
+    printf 'echo json_encode(["status"=>"healthy","timestamp"=>date("c")]);\n' >> /usr/local/share/php-api-stack/health.php; \
     fi && \
-    chown nginx:nginx /var/www/html/public/health.php && \
-    chmod 644 /var/www/html/public/health.php && \
-    rm -f /tmp/health-comprehensive.php && \
-    echo "  [✓] Health check installed successfully"
+    php -l /usr/local/share/php-api-stack/index.php && \
+    echo "  [✓] Templates validated and ready"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

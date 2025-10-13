@@ -100,11 +100,27 @@ else
     log_info "Configurations already processed, skipping..."
 fi
 
-# Create required directories (sempre necessário caso volumes sejam montados)
+
+# optimization for production environment to force static PHP-FPM mode
+if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
+    if [ "${PHP_FPM_PM}" != "static" ]; then
+        log_info "Environment is production. Overriding PHP_FPM_PM to 'static' for peak performance."
+        export PHP_FPM_PM="static"
+    fi
+    if [ -z "${PHP_FPM_PM_MAX_CHILDREN}" ] || [ "${PHP_FPM_PM_MAX_CHILDREN}" -lt 50 ]; then
+        log_warning "PHP_FPM_PM_MAX_CHILDREN is low for production static mode. Recommended >= 50."
+    fi
+else
+    log_info "Environment is non-production. Using dynamic PHP-FPM settings."
+fi
+
+
+# Create required directories 
 log_info "Creating required directories..."
-mkdir -p /var/run/php /var/run/nginx /var/log/php /var/log/nginx /var/log/redis /var/log/supervisor
-chown -R nginx:nginx /var/run/php /var/log/php
-chown -R nginx:nginx /var/run/nginx /var/log/nginx
+chown -R nginx:nginx /var/log/php /var/log/nginx /var/run/php
+chown -R redis:redis /var/log/redis || true
+chown -R root:root /var/log/supervisor
+chown -R nginx:nginx /var/run/nginx # Nginx run dir
 
 # Fix permissions for session directory if using files
 if [ "${PHP_SESSION_SAVE_HANDLER}" = "files" ]; then
@@ -153,6 +169,48 @@ if [ -f "/var/www/html/bin/console" ]; then
             touch "$ASSETS_FLAG"
         fi
     fi
+fi
+
+# Install demo index.php if no application is mounted
+if [ ! -f "/var/www/html/public/index.php" ]; then
+    log_info "No application detected. Installing demo landing page..."
+    
+    if [ -f "/usr/local/share/php-api-stack/index.php" ]; then
+        cp /usr/local/share/php-api-stack/index.php /var/www/html/public/index.php
+        log_info "Demo landing page installed"
+    else
+        log_warning "Demo template not found, creating basic fallback"
+        cat > /var/www/html/public/index.php << 'EOF'
+<?php
+phpinfo();
+EOF
+    fi
+    
+    chown nginx:nginx /var/www/html/public/index.php
+    chmod 644 /var/www/html/public/index.php
+else
+    log_info "Application detected at /var/www/html/public/index.php - skipping demo installation"
+fi
+
+# Create health check endpoint if doesn't exist
+if [ ! -f "/var/www/html/public/health.php" ]; then
+    log_info "Installing health check endpoint..."
+    
+    # Copy from template if exists, otherwise create basic fallback
+    if [ -f "/usr/local/share/php-api-stack/health.php" ]; then
+        cp /usr/local/share/php-api-stack/health.php /var/www/html/public/health.php
+        log_info "Health check installed from template"
+    else
+        log_warning "Health check template not found, creating basic fallback"
+        cat > /var/www/html/public/health.php << 'EOF'
+<?php
+header('Content-Type: application/json');
+echo json_encode(['status' => 'healthy', 'timestamp' => date('c')], JSON_PRETTY_PRINT);
+EOF
+    fi
+    
+    chown nginx:nginx /var/www/html/public/health.php
+    chmod 644 /var/www/html/public/health.php
 fi
 
 # Create health check endpoint if doesn't exist
