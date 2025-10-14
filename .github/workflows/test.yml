@@ -20,7 +20,6 @@ jobs:
     name: Build and Push Image
     needs: lint
     runs-on: ubuntu-latest
-    # Grant permissions for the GITHUB_TOKEN to push images to GHCR
     permissions:
       contents: read
       packages: write
@@ -45,7 +44,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
-          # This creates a unique tag based on the Git commit SHA
           tags: type=sha,prefix=
 
       - name: Create .env file for build
@@ -58,17 +56,19 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # Enable Docker layer caching
           cache-from: type=gha,scope=${{ github.workflow }}
           cache-to: type=gha,scope=${{ github.workflow }},mode=max
 
-  # This job now pulls the image directly from the registry
   test:
     name: Run Tests
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create .env file for testing
+        run: cp .env.example .env
 
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
@@ -77,15 +77,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull image
-        run: docker pull ${{ needs.build.outputs.image_tag }}
+      - name: Pull and retag image
+        run: |
+          docker pull ${{ needs.build.outputs.image_tag }}
+          docker tag ${{ needs.build.outputs.image_tag }} kariricode/php-api-stack:latest
 
       - name: Run comprehensive tests
-        # You may need to adapt your Makefile to accept the image tag as a parameter
-        # For simplicity, we retag it to latest locally
-        run: |
-          docker tag ${{ needs.build.outputs.image_tag }} kariricode/php-api-stack:latest
-          make test
+        run: make test
 
       - name: Run integration tests
         run: |
@@ -95,13 +93,16 @@ jobs:
           curl -f http://localhost:8080/health
           make stop
 
-  # Simplified test-health job
   test-health:
     name: Test Health Checks
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create .env file for testing
+        run: cp .env.example .env
 
       - name: Log in to the GitHub Container Registry
         uses: docker/login-action@v3
@@ -110,12 +111,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull image
-        run: docker pull ${{ needs.build.outputs.image_tag }}
-
-      - name: Retag image and run tests
+      - name: Pull and retag image
         run: |
+          docker pull ${{ needs.build.outputs.image_tag }}
           docker tag ${{ needs.build.outputs.image_tag }} kariricode/php-api-stack:latest
+
+      - name: Run health checks
+        run: |
           make build-test-image
           make run-test
           sleep 10
@@ -123,7 +125,6 @@ jobs:
           curl -s http://localhost:8080/health.php | jq '.status' | grep -q "healthy"
           make stop-test
 
-  # Simplified security job
   security:
     name: Security Scan
     needs: build
@@ -131,7 +132,7 @@ jobs:
     permissions:
       contents: read
       packages: read
-      security-events: write # Required to upload SARIF results
+      security-events: write
     steps:
       - name: Run Trivy scan
         uses: aquasecurity/trivy-action@0.20.0
@@ -140,7 +141,6 @@ jobs:
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
-          # GHCR is a private registry by default for the running workflow, so auth is needed
           github-pat: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Trivy results
