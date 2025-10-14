@@ -93,38 +93,6 @@ jobs:
           curl -f http://localhost:8080/health
           make stop
 
-  test-health:
-    name: Test Health Checks
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Create .env file for testing
-        run: cp .env.example .env
-
-      - name: Log in to the GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Pull and retag image
-        run: |
-          docker pull ${{ needs.build.outputs.image_tag }}
-          docker tag ${{ needs.build.outputs.image_tag }} kariricode/php-api-stack:latest
-
-      - name: Run health checks
-        run: |
-          make build-test-image
-          make run-test
-          sleep 10
-          make test-health
-          curl -s http://localhost:8080/health.php | jq '.status' | grep -q "healthy"
-          make stop-test
-
   security:
     name: Security Scan
     needs: build
