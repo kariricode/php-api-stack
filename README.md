@@ -100,7 +100,7 @@ All configurations via `.env` file:
 PHP_MEMORY_LIMIT=256M
 PHP_OPCACHE_MEMORY=256
 PHP_OPCACHE_JIT=tracing
-PHP_FPM_PM_MAX_CHILDREN=50
+PHP_FPM_PM_MAX_CHILDREN=60
 
 # Environment
 APP_ENV=production

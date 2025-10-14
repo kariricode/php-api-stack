@@ -1660,5 +1660,3 @@ For testing issues:
 - [README.md](README.md) - Project overview
 
 ---
-
-<sub>Last updated: $(date +%Y-%m-%d) | Version: $(cat VERSION)</sub>

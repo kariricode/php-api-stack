@@ -6,6 +6,7 @@
 ARG PHP_VERSION=8.4
 ARG NGINX_VERSION=1.27.3
 ARG REDIS_VERSION=7.2
+ARG ALPINE_VERSION=3.21
 ARG VERSION=1.2.0
 
 # Stage 1: Redis binaries
@@ -15,7 +16,7 @@ FROM redis:${REDIS_VERSION}-alpine AS redis-build
 FROM nginx:${NGINX_VERSION}-alpine AS nginx-build
 
 # Stage 3: Main application
-FROM php:${PHP_VERSION}-fpm-alpine AS base
+FROM php:${PHP_VERSION}-fpm-alpine${ALPINE_VERSION} AS base
 
 # Set shell with pipefail for robust error handling
 # Reference: https://docs.docker.com/engine/reference/builder/#shell
@@ -25,6 +26,7 @@ SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 ARG PHP_VERSION
 ARG NGINX_VERSION
 ARG REDIS_VERSION
+ARG ALPINE_VERSION
 ARG COMPOSER_VERSION=2.8.12
 ARG SYMFONY_CLI_VERSION=7.3.0
 ARG PHP_CORE_EXTENSIONS="pdo pdo_mysql opcache intl zip bcmath gd mbstring xml"
@@ -69,7 +71,7 @@ RUN set -eux; \
     shadow \
     su-exec \
     tini \
-    supervisor \
+    # supervisor \
     git \
     curl \
     wget \
@@ -280,7 +282,7 @@ RUN set -eux; \
     /var/log/nginx \
     /var/log/php \
     /var/log/redis \
-    /var/log/supervisor \
+    # /var/log/supervisor \
     /var/log/symfony \
     /var/run \
     /var/run/php \
@@ -345,7 +347,7 @@ COPY php/php.ini /usr/local/etc/php/php.ini.template
 COPY php/php-fpm.conf /usr/local/etc/php-fpm.conf.template
 COPY php/www.conf /usr/local/etc/php-fpm.d/www.conf.template
 COPY redis/redis.conf /etc/redis/redis.conf.template
-COPY supervisor/supervisord.conf /etc/supervisor/supervisord.conf
+# COPY supervisor/supervisord.conf /etc/supervisor/supervisord.conf
 
 # Copy entrypoint script
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint
@@ -421,4 +423,5 @@ VOLUME ["/var/www/html", "/var/log", "/var/lib/redis"]
 # Use tini as init system for proper signal handling
 # Reference: https://github.com/krallin/tini
 ENTRYPOINT ["/sbin/tini", "--", "docker-entrypoint"]
-CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+# CMD ["supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+CMD ["start"]

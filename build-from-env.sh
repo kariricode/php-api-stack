@@ -141,6 +141,7 @@ echo -e "${YELLOW}Stack Versions:${NC}"
 echo "  • PHP:         ${PHP_VERSION}"
 echo "  • Nginx:       ${NGINX_VERSION}"
 echo "  • Redis:       ${REDIS_VERSION}"
+echo "  • Alpine:      ${ALPINE_VERSION}"
 echo "  • Composer:    ${COMPOSER_VERSION}"
 echo "  • Symfony CLI: ${SYMFONY_CLI_VERSION}"
 echo ""
@@ -212,6 +213,7 @@ BUILD_CMD="$BUILD_CMD \
     --build-arg PHP_VERSION=${PHP_VERSION} \
     --build-arg NGINX_VERSION=${NGINX_VERSION} \
     --build-arg REDIS_VERSION=${REDIS_VERSION} \
+    --build-arg ALPINE_VERSION=${ALPINE_VERSION} \
     --build-arg COMPOSER_VERSION=${COMPOSER_VERSION} \
     --build-arg SYMFONY_CLI_VERSION=${SYMFONY_CLI_VERSION} \
     --build-arg PHP_CORE_EXTENSIONS=\"${PHP_CORE_EXTENSIONS}\" \

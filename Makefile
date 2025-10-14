@@ -136,6 +136,7 @@ run-test: ## run test container with comprehensive health check
 	@docker run -d \
 		--name $(TEST_CONTAINER) \
 		-p 8080:80 \
+		--env-file .env \
 		-v $(PWD)/logs:/var/log \
 		$(FULL_IMAGE):test
 	@echo ""
@@ -275,6 +276,7 @@ run: ## Run local container for demo/testing
 	@docker run -d \
 		--name $(LOCAL_CONTAINER) \
 		-p 8080:80 \
+		--env-file .env \
 		-v $(PWD)/logs:/var/log \
 		$(FULL_IMAGE):latest
 	@echo "$(GREEN)✓ Container running at http://localhost:8080$(NC)"
@@ -309,6 +311,7 @@ run-with-app: ## Run local container with mounted application
 	@docker run -d \
 		--name $(LOCAL_CONTAINER) \
 		-p 8080:80 \
+		--env-file .env \
 		-v $(PWD)/app:/var/www/html \
 		-v $(PWD)/logs:/var/log \
 		$(FULL_IMAGE):latest
@@ -317,7 +320,8 @@ run-with-app: ## Run local container with mounted application
 	@echo ""
 	@echo "$(BLUE)Next steps:$(NC)"
 	@echo "  1. Create your $(CYAN)app/public/index.php$(NC)"
-	@echo "  2. Run $(CYAN)docker exec $(LOCAL_CONTAINER) supervisorctl restart nginx$(NC)"
+# 	@echo "  2. Run $(CYAN)docker exec $(LOCAL_CONTAINER) supervisorctl restart nginx$(NC)"
+	@echo "  2. Run $(CYAN)docker exec $(LOCAL_CONTAINER) nginx -s reload$(NC)"
 	@echo "  3. Visit http://localhost:8080"
 
 .PHONY: stop

@@ -119,7 +119,7 @@ fi
 log_info "Creating required directories..."
 chown -R nginx:nginx /var/log/php /var/log/nginx /var/run/php
 chown -R redis:redis /var/log/redis || true
-chown -R root:root /var/log/supervisor
+# chown -R root:root /var/log/supervisor
 chown -R nginx:nginx /var/run/nginx # Nginx run dir
 
 # Fix permissions for session directory if using files
@@ -294,12 +294,30 @@ fi
 # ==============================================================================
 # START SERVICES BASED ON COMMAND
 # ==============================================================================
-
-# Comandos específicos
+# removed:
+# supervisord|supervisor)
+#     log_info "Starting all services with Supervisor..."
+#     exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+#     ;;
+# Especifics commands 
 case "$1" in
-    supervisord|supervisor)
-        log_info "Starting all services with Supervisor..."
-        exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+    start)
+        log_info "Starting all services..."
+        
+        # Start Redis in background (daemonize)
+        log_info "  -> Starting Redis..."
+        redis-server /etc/redis/redis.conf --daemonize yes
+        
+        # Start PHP-FPM in background (daemonize)
+        log_info "  -> Starting PHP-FPM..."
+        php-fpm -D
+        
+        # Start Nginx in foreground. The `exec` command is crucial here.
+        # It replaces the script process with the Nginx process, making Nginx
+        # the main container process (PID 1). This ensures it receives
+        # Docker signals correctly (e.g., docker stop).
+        log_info "  -> Starting Nginx (foreground)..."
+        exec nginx -g 'daemon off;'
         ;;
     php-fpm)
         log_info "Starting PHP-FPM only..."
@@ -320,12 +338,12 @@ case "$1" in
         ;;
     *)
         # Default: start supervisord if no command given
-        if [ "$#" -eq 0 ]; then
-            log_info "Starting all services with Supervisor (default)..."
-            exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
-        else
+        # if [ "$#" -eq 0 ]; then
+        #     log_info "Starting all services with Supervisor (default)..."
+        #     exec /usr/bin/supervisord -c /etc/supervisor/supervisord.conf
+        # else
             # Pass through any command
             exec "$@"
-        fi
+        # fi
         ;;
 esac
