@@ -276,6 +276,7 @@ run: ## Run local container for demo/testing
 	@docker run -d \
 		--name $(LOCAL_CONTAINER) \
 		-p 8080:80 \
+		-e DEMO_MODE=truue \
 		--env-file .env \
 		-v $(PWD)/logs:/var/log \
 		$(FULL_IMAGE):latest
