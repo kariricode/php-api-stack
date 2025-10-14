@@ -18,7 +18,7 @@ namespace KaririCode\PhpApiStack\Demo;
 // Security: Prevent direct access in production environments
 if (getenv('APP_ENV') === 'production' && !getenv('DEMO_MODE')) {
     http_response_code(404);
-    exit('Not Found Walmir');
+    exit('Not Found');
 }
 
 /**
@@ -583,6 +583,7 @@ $stackInfo = [
                 <h2>Quick Links</h2>
                 <div class="quick-links">
                     <a href="/health.php" class="quick-link">Health Check</a>
+                    <a href="/fpm-status" class="quick-link">PHP-FPM Status</a>
                     <a href="https://github.com/kariricode/php-api-stack" class="quick-link" target="_blank">Documentation</a>
                     <a href="https://hub.docker.com/r/kariricode/php-api-stack" class="quick-link" target="_blank">Docker Hub</a>
                 </div>
