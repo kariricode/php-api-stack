@@ -28,10 +28,10 @@ ARG NGINX_VERSION
 ARG REDIS_VERSION
 ARG ALPINE_VERSION
 ARG COMPOSER_VERSION=2.8.12
-ARG SYMFONY_CLI_VERSION=7.3.0
+ARG SYMFONY_CLI_VERSION=5.15.1
 ARG PHP_CORE_EXTENSIONS="pdo pdo_mysql opcache intl zip bcmath gd mbstring xml"
 ARG PHP_PECL_EXTENSIONS="redis apcu uuid"
-ARG APP_ENV=production
+ARG APP_ENV=development
 ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
@@ -247,10 +247,11 @@ RUN set -eux; \
     chmod 777 /composer; \
     echo "  [✓] Composer installed successfully"
 
-# Install Symfony CLI with retry logic
+# Install Symfony CLI (only for development environment)
 # Reference: https://symfony.com/download
 RUN set -eux; \
-    echo "==> Installing Symfony CLI ${SYMFONY_CLI_VERSION}..."; \
+    if [ "${APP_ENV}" = "development" ]; then \
+    echo "==> Installing Symfony CLI ${SYMFONY_CLI_VERSION} (APP_ENV=development)..."; \
     for i in 1 2 3; do \
     echo "  Attempt $i to download Symfony CLI..."; \
     if wget --progress=dot:giga -O /tmp/symfony-installer https://get.symfony.com/cli/installer; then \
@@ -270,7 +271,10 @@ RUN set -eux; \
     sleep 2; \
     done; \
     symfony version || echo "  [!] Symfony CLI installation failed (non-critical)"; \
-    echo "  [✓] Symfony CLI installed successfully"
+    echo "  [✓] Symfony CLI installed successfully"; \
+    else \
+    echo "==> Skipping Symfony CLI installation (APP_ENV=${APP_ENV})"; \
+    fi
 
 # Create directory structure with proper permissions
 # Following the Principle of Least Privilege
