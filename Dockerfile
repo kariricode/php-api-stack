@@ -37,7 +37,7 @@ ARG VCS_REF
 ARG VERSION
 
 # Metadata with dynamic version
-LABEL maintainer="kariricode <kariricode@github.com>" \
+LABEL maintainer="KaririCode <commuunity@kariricode.org>" \
     org.opencontainers.image.title="PHP API Stack" \
     org.opencontainers.image.description="Production-ready PHP + Nginx + Redis + Symfony stack" \
     org.opencontainers.image.version="${VERSION}" \

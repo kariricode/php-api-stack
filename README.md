@@ -310,40 +310,39 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) file.
 - **Discussions**: [GitHub Discussions](https://github.com/kariricode/php-api-stack/discussions)
 - **Docker Hub**: [kariricode/php-api-stack](https://hub.docker.com/r/kariricode/php-api-stack)
 
-## 📅 Changelog
+---
 
-### [1.2.1] - 2025-10-09
-- 🏥 Added comprehensive health check with SOLID architecture
-- 📊 Detailed validation for all stack components
-- 🔧 Enhanced Makefile with health monitoring
-- 📚 Separated documentation (README, TESTING, DOCKER_HUB, IMAGE_USAGE_GUIDE)
-- ✅ Production and test build separation
+## 🧭 Roadmap & Contributing
 
-### [1.2.0] - 2025-10-08
-- ✨ Improved PHP extension installation
-- 🔧 Enhanced build script
-- 📚 Complete English documentation
-- 🛠 Fixed PHP-FPM socket performance
-- ⚡ Production optimizations
+Feature requests and PRs are welcome in the source repository:
 
-## 💬 Author
+* GitHub: [https://github.com/kariricode/php-api-stack](https://github.com/kariricode/php-api-stack)
 
-**kariricode**
-- GitHub: [@kariricode](https://github.com/kariricode)
-- Docker Hub: [kariricode](https://hub.docker.com/u/kariricode)
+For broader ecosystem projects, visit:
+
+* KaririCode Framework: [https://github.com/KaririCode-Framework](https://github.com/KaririCode-Framework)
 
 ---
 
-<div align="center">
+## 📝 Changelog (excerpt)
 
-⭐ **If this project helped you, give it a star!** ⭐
+**1.2.0**
 
-📧 **Commercial support**: kariricode@github.com
+* PHP 8.4, Nginx 1.27.3, Redis 7.2
+* Socket‑based PHP‑FPM; OPcache + JIT optimized
+* `/health.php` endpoint; improved entrypoint & config processor
+* Extensive env‑var configuration for Nginx/PHP/Redis
 
-🔗 **Links**: [Docker Hub](https://hub.docker.com/r/kariricode/php-api-stack) | [GitHub](https://github.com/kariricode/php-api-stack) | [Documentation](IMAGE_USAGE_GUIDE.md)
-
-</div>
+> Full release notes are available in the GitHub repository.
 
 ---
 
-<sub>Developed with ❤️ for the PHP community</sub>
+## 📄 License
+
+See `LICENSE` in the source repository.
+
+---
+
+## 🙌 Credits
+
+Made with 💚 by **KaririCode** — [https://kariricode.org/](https://kariricode.org/)
