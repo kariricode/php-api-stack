@@ -1,15 +1,20 @@
-version: '3.8'
-
 services:
   php-api-stack:
-    image: kariricode/php-api-stack:${VERSION:-1.0.5}
+    image: kariricode/php-api-stack:latest
     container_name: php-api-stack
     restart: unless-stopped
+    environment:
+      - DEMO_MODE=true
     env_file:
       - .env
     ports:
+      # Expose the application port to the host
       - "${APP_PORT:-8089}:80"
-      - "${METRICS_PORT:-9090}:9090" # Prometheus metrics
+      # Expose the internal redis port to the host if REDIS_HOST_PORT is set
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    expose:
+      # Expose PHP-FPM metrics port internally for Prometheus
+      - "${METRICS_PHP_FPM_PORT:-9000}"
     volumes:
       # Application code
       - ./app:/var/www/html:rw,cached
@@ -22,17 +27,18 @@ services:
       - ./logs/nginx:/var/log/nginx:rw
       - ./logs/php:/var/log/php:rw
       - ./logs/redis:/var/log/redis:rw
-      - ./logs/supervisor:/var/log/supervisor:rw
+      # - ./logs/supervisor:/var/log/supervisor:rw
+
       # Custom configurations (optional)
-      # - ./config/nginx/conf.d:/etc/nginx/conf.d:ro
-      # - ./config/php/conf.d:/usr/local/etc/php/conf.d:ro
+      - ./example/config/nginx/conf.d:/etc/nginx/conf.d:ro
+      # - ./example/config/php/conf.d:/usr/local/etc/php/conf.d:ro
 
     networks:
       - app-network
       - db-network
 
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost/health" ]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -41,15 +47,15 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '${CONTAINER_CPU_LIMIT:-2}'
-          memory: ${CONTAINER_MEMORY_LIMIT:-1G}
+          cpus: "${CONTAINER_CPU_LIMIT:-2}"
+          memory: "${CONTAINER_MEMORY_LIMIT:-1G}"
         reservations:
-          cpus: '${CONTAINER_CPU_RESERVATION:-0.5}'
-          memory: ${CONTAINER_MEMORY_RESERVATION:-512M}
+          cpus: "${CONTAINER_CPU_RESERVATION:-0.5}"
+          memory: "${CONTAINER_MEMORY_RESERVATION:-512M}"
 
     labels:
       - "com.kariricode.description=PHP API Stack with Nginx, Redis, and Symfony"
-      - "com.kariricode.version=${VERSION:-1.0.5}"
+      - "com.kariricode.version=latest"
       - "com.kariricode.environment=${APP_ENV:-production}"
 
     # Security options
@@ -79,13 +85,25 @@ services:
       MYSQL_PASSWORD: ${DB_PASSWORD:-api_password}
     volumes:
       - mysql_data:/var/lib/mysql
-      - ./config/mysql/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
+      - ./example/config/mysql/my.cnf:/etc/mysql/conf.d/custom.cnf:ro
     ports:
       - "${DB_PORT:-3306}:3306"
     networks:
       - db-network
+    profiles:
+      - db
     healthcheck:
-      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-root_secret}" ]
+      test:
+        [
+          "CMD",
+          "mysqladmin",
+          "ping",
+          "-h",
+          "localhost",
+          "-u",
+          "root",
+          "-p${DB_ROOT_PASSWORD:-root_secret}",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -93,26 +111,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
+          cpus: "1"
           memory: 1G
-
-  # Optional: External Redis for distributed setups
-  redis-external:
-    image: redis:${REDIS_VERSION:-7.2}-alpine
-    container_name: php-api-redis-external
-    restart: unless-stopped
-    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
-    volumes:
-      - redis_external_data:/data
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    networks:
-      - app-network
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   # Optional: Nginx as Load Balancer (for scaling)
   nginx-lb:
@@ -123,8 +123,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      - ./config/nginx-lb/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./config/nginx-lb/conf.d:/etc/nginx/conf.d:ro
+      - ./example/config/nginx-lb/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./example/config/nginx-lb/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
     networks:
       - app-network
@@ -139,17 +139,18 @@ services:
     container_name: php-api-prometheus
     restart: unless-stopped
     volumes:
-      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./example/config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
     ports:
-      - "9091:9090"
+      - "${PROMETHEUS_PORT:-9091}:9090"
     networks:
       - monitoring
+      - app-network
     profiles:
       - monitoring
 
@@ -163,13 +164,62 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./example/config/grafana/provisioning:/etc/grafana/provisioning:ro
     ports:
-      - "3000:3000"
+      - "${GRAFANA_PORT:-3000}:3000"
     networks:
       - monitoring
     depends_on:
       - prometheus
+    profiles:
+      - monitoring
+
+  nginx-exporter:
+    image: nginx/nginx-prometheus-exporter:0.11.0
+    container_name: php-api-nginx-exporter
+    restart: unless-stopped
+    command:
+      - -nginx.scrape-uri=http://php-api-stack/nginx_status
+      - -nginx.retries=10
+      - -web.listen-address=:9113
+      - -web.telemetry-path=/metrics
+    networks:
+      - app-network
+    depends_on:
+      - php-api-stack
+    profiles:
+      - monitoring
+
+  php-fpm-exporter:
+    image: hipages/php-fpm_exporter:latest
+    container_name: php-api-phpfpm-exporter
+    restart: unless-stopped
+    environment:
+      PHP_FPM_SCRAPE_URI: "tcp://php-api-stack:${METRICS_PHP_FPM_PORT:-9000}/status"
+    networks:
+      - app-network
+    depends_on:
+      - php-api-stack
+    profiles:
+      - monitoring
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: php-api-redis-exporter
+    restart: unless-stopped
+    env_file:
+      # Load variables from .env file to get credentials
+      - .env
+    environment:
+      # Connect to the service name and internal port 6379
+      - REDIS_ADDR=tcp://php-api-stack:6379
+      # Provide password for Redis authentication (read from .env file)
+      # Defaults to empty if not set, allowing connection to Redis without a password
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    networks:
+      - app-network
+    depends_on:
+      - php-api-stack
     profiles:
       - monitoring
 
@@ -196,8 +246,6 @@ volumes:
   php_sessions:
     driver: local
   redis_data:
-    driver: local
-  redis_external_data:
     driver: local
   mysql_data:
     driver: local

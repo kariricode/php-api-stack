@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: 'PHP API Stack Dashboards'
+    orgId: 1
+    folder: 'PHP API Stack'
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

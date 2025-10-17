@@ -23,7 +23,7 @@ export PHP_DATE_TIMEZONE=${PHP_DATE_TIMEZONE:-America/Sao_Paulo}
 export PHP_DISPLAY_ERRORS=${PHP_DISPLAY_ERRORS:-Off}
 export PHP_ERROR_LOG=${PHP_ERROR_LOG:-/var/log/php/error.log}
 export PHP_SESSION_SAVE_HANDLER=${PHP_SESSION_SAVE_HANDLER:-redis}
-export PHP_SESSION_SAVE_PATH=${PHP_SESSION_SAVE_PATH:-tcp://127.0.0.1:6379}
+export PHP_SESSION_SAVE_PATH=${PHP_SESSION_SAVE_PATH:-tcp://${REDIS_HOST:-redis}:6379?auth=${REDIS_PASSWORD}}
 export PHP_OPCACHE_ENABLE=${PHP_OPCACHE_ENABLE:-1}
 export PHP_OPCACHE_MEMORY=${PHP_OPCACHE_MEMORY:-256}
 export PHP_OPCACHE_MAX_FILES=${PHP_OPCACHE_MAX_FILES:-20000}
@@ -32,6 +32,8 @@ export PHP_OPCACHE_REVALIDATE_FREQ=${PHP_OPCACHE_REVALIDATE_FREQ:-0}
 export PHP_OPCACHE_JIT=${PHP_OPCACHE_JIT:-tracing}
 export PHP_OPCACHE_JIT_BUFFER_SIZE=${PHP_OPCACHE_JIT_BUFFER_SIZE:-128M}
 export PHP_FPM_REQUEST_SLOWLOG_TIMEOUT=${PHP_FPM_REQUEST_SLOWLOG_TIMEOUT:-30s}
+
+export METRICS_PHP_FPM_PORT=${METRICS_PHP_FPM_PORT:-9000}
 
 export XDEBUG_MODE=${XDEBUG_MODE:-off}
 export XDEBUG_HOST=${XDEBUG_HOST:-host.docker.internal}
@@ -46,6 +48,21 @@ export NGINX_GZIP=${NGINX_GZIP:-on}
 export NGINX_GZIP_COMP_LEVEL=${NGINX_GZIP_COMP_LEVEL:-6}
 export NGINX_ACCESS_LOG=${NGINX_ACCESS_LOG:-/var/log/nginx/access.log}
 export NGINX_ERROR_LOG=${NGINX_ERROR_LOG:-/var/log/nginx/error.log}
+
+export REDIS_HOST=${REDIS_HOST:-redis}
+export REDIS_APPENDONLY=${REDIS_APPENDONLY:-yes}
+export REDIS_APPENDFSYNC=${REDIS_APPENDFSYNC:-everysec}
+export REDIS_SAVE=${REDIS_SAVE:-"900 1 300 10 60 10000"}
+export REDIS_LOG_LEVEL=${REDIS_LOG_LEVEL:-notice}
+export REDIS_LOG_FILE=${REDIS_LOG_FILE:-""}
+
+export REDIS_MAXMEMORY=${REDIS_MAXMEMORY:-256M}
+export REDIS_MAXMEMORY_SAMPLES=${REDIS_MAXMEMORY_SAMPLES:-5} 
+export REDIS_PASSWORD=${REDIS_PASSWORD:-}
+export REDIS_DATABASES=${REDIS_DATABASES:-16}
+export REDIS_MAXMEMORY_POLICY=${REDIS_MAXMEMORY_POLICY:-volatile-lru}
+export REDIS_MAXCLIENTS=${REDIS_MAXCLIENTS:-10000}
+export REDIS_TIMEOUT=${REDIS_TIMEOUT:-0}
 
 # Create a list of variables for envsubst to process
 VARS_TO_SUBSTITUTE='
@@ -78,6 +95,7 @@ $PHP_OPCACHE_VALIDATE_TIMESTAMPS
 $PHP_OPCACHE_REVALIDATE_FREQ
 $PHP_OPCACHE_JIT
 $PHP_OPCACHE_JIT_BUFFER_SIZE
+$METRICS_PHP_FPM_PORT
 $XDEBUG_MODE
 $XDEBUG_HOST
 $XDEBUG_PORT
@@ -90,6 +108,19 @@ $NGINX_GZIP
 $NGINX_GZIP_COMP_LEVEL
 $NGINX_ACCESS_LOG
 $NGINX_ERROR_LOG
+$REDIS_HOST
+$REDIS_APPENDONLY
+$REDIS_APPENDFSYNC
+$REDIS_SAVE
+$REDIS_LOG_LEVEL
+$REDIS_LOG_FILE
+$REDIS_MAXMEMORY
+$REDIS_MAXMEMORY_SAMPLES
+$REDIS_PASSWORD
+$REDIS_DATABASES
+$REDIS_MAXMEMORY_POLICY
+$REDIS_MAXCLIENTS
+$REDIS_TIMEOUT
 '
 
 
@@ -132,6 +163,11 @@ fi
 if [ -f /usr/local/etc/php-fpm.d/www.conf.template ]; then
     envsubst "$VARS_TO_SUBSTITUTE" < /usr/local/etc/php-fpm.d/www.conf.template > /usr/local/etc/php-fpm.d/www.conf
     echo "  ✓ PHP-FPM pool configuration processed"
+fi
+
+if [ -f /usr/local/etc/php-fpm.d/monitoring.conf.template ]; then
+    envsubst "$VARS_TO_SUBSTITUTE" < /usr/local/etc/php-fpm.d/monitoring.conf.template > /usr/local/etc/php-fpm.d/monitoring.conf
+    echo "   ✓ PHP-FPM monitoring pool configuration processed"
 fi
 
 if [ -f /etc/redis/redis.conf.template ]; then

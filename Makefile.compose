@@ -1,0 +1,196 @@
+# ============================================================================
+# Makefile.compose - Docker Compose targets (included by main Makefile)
+# ============================================================================
+
+# Load environment variables from .env file and export them
+-include .env
+export
+
+# --- Configuration Variables ---
+COMPOSE_CMD    ?= docker compose
+COMPOSE_FILE   ?= docker-compose.example.yml
+COMPOSE        := $(COMPOSE_CMD) -f $(COMPOSE_FILE)
+
+# Profiles to activate (can be overridden from the command line)
+# Ex: make compose-up PROFILES=db
+PROFILES       ?=
+ifdef PROFILES
+  PROFILE_ENV := COMPOSE_PROFILES=$(PROFILES)
+else
+  PROFILE_ENV :=
+endif
+
+# Profiles for the "all" commands
+ALL_PROFILES   ?= loadbalancer,monitoring
+
+# --- Command Defaults ---
+# These now act as fallbacks if not defined in the .env file
+SERVICE         ?= php-api-stack
+SERVICES        ?= $(SERVICE)
+CMD             ?= bash
+APP_PORT        ?= 8089
+PROMETHEUS_PORT ?= 9091
+GRAFANA_PORT    ?= 3000
+TAIL            ?= 200
+SINCE           ?=
+
+# ============================================================================
+# HELP
+# ============================================================================
+.PHONY: compose-help
+compose-help: ## Show help for Docker Compose commands
+	@echo "$(GREEN)╔══════════════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║              Docker Compose Controls (Make)            ║$(NC)"
+	@echo "$(GREEN)╚══════════════════════════════════════════════════════╝$(NC)"
+	@echo "$(CYAN)Compose file:$(NC) $(COMPOSE_FILE)"
+	@echo "$(CYAN)Default Profiles:$(NC) $(if $(PROFILES),$(PROFILES),<none>)"
+	@echo ""
+	@echo "$(MAGENTA)═══ LIFECYCLE (All Services) ═══$(NC)"
+	@echo "  $(YELLOW)make compose-up PROFILES=\"...\"$(NC)    $(BLUE)# Up base services + specified profiles$(NC)"
+	@echo "  $(YELLOW)make compose-up-all$(NC)           $(BLUE)# Shortcut to up profiles: $(ALL_PROFILES)$(NC)"
+	@echo "  $(YELLOW)make compose-down-v$(NC)           $(BLUE)# Down services (respects PROFILES) & remove volumes$(NC)"
+	@echo "  $(YELLOW)make compose-down-all$(NC)         $(BLUE)# Down everything (base + all profiles) & remove volumes$(NC)"
+	@echo "  $(YELLOW)make compose-restart$(NC)          $(BLUE)# Restart services (respects PROFILES)$(NC)"
+	@echo "  $(YELLOW)make compose-ps$(NC)               $(BLUE)# Show container status$(NC)"
+	@echo ""
+	@echo "$(MAGENTA)═══ LIFECYCLE (Selected Services) ═══$(NC)"
+	@echo "  $(YELLOW)make compose-up-svc SERVICES=\"php-api-stack mysql\"$(NC)"
+	@echo "  $(YELLOW)make compose-restart-svc SERVICES=\"prometheus\"$(NC)"
+	@echo ""
+	@echo "$(MAGENTA)═══ LOGS ═══$(NC)"
+	@echo "  $(YELLOW)make compose-logs$(NC)              $(BLUE)# Tail logs for all active services$(NC)"
+	@echo "  $(YELLOW)make compose-logs-all$(NC)          $(BLUE)# Tail logs for base services + all profiles$(NC)"
+	@echo "  $(YELLOW)make compose-logs-once$(NC)         $(BLUE)# Show the latest logs for all services (no follow)$(NC)"
+	@echo "  $(YELLOW)make compose-logs-svc SERVICES=\"php-api-stack\"$(NC)"
+	@echo "  $(YELLOW)make compose-logs-svc-once SERVICES=\"php-api-stack\"$(NC)"
+	@echo ""
+	@echo "$(MAGENTA)═══ UTILITIES ═══$(NC)"
+	@echo "  $(YELLOW)make compose-shell SERVICE=mysql$(NC)  $(BLUE)# Open a shell in the specified container$(NC)"
+	@echo "  $(YELLOW)make compose-exec CMD=\"php -v\"$(NC)    $(BLUE)# Run a command in the default container ($(SERVICE))$(NC)"
+	@echo "  $(YELLOW)make compose-config$(NC)            $(BLUE)# Show the resolved Compose config$(NC)"
+	@echo "  $(YELLOW)make compose-health$(NC)            $(BLUE)# Probe the health check endpoint$(NC)"
+	@echo "  $(YELLOW)make compose-open$(NC)               $(BLUE)# Open app, Prometheus, and Grafana in browser$(NC)"
+
+# ============================================================================
+# LIFECYCLE (All Services)
+# ============================================================================
+.PHONY: compose-up
+compose-up: ## Up services in the background (respects PROFILES variable)
+	$(PROFILE_ENV) $(COMPOSE) up -d
+
+.PHONY: compose-up-all
+compose-up-all: ## Shortcut to up base services + all profiles ($(ALL_PROFILES))
+	COMPOSE_PROFILES=$(ALL_PROFILES) $(COMPOSE) up -d
+
+.PHONY: compose-down
+compose-down: ## Stop and remove containers (respects PROFILES)
+	$(PROFILE_ENV) $(COMPOSE) down
+
+.PHONY: compose-down-v
+compose-down-v: ## Stop and remove containers and volumes (respects PROFILES)
+	$(PROFILE_ENV) $(COMPOSE) down -v
+
+.PHONY: compose-down-all
+compose-down-all: ## Shortcut to down everything (base + all profiles) and remove volumes
+	COMPOSE_PROFILES=$(ALL_PROFILES) $(COMPOSE) down -v
+
+.PHONY: compose-restart
+compose-restart: ## Restart services (respects PROFILES)
+	$(PROFILE_ENV) $(COMPOSE) restart
+
+.PHONY: compose-ps
+compose-ps: ## Show compose service status
+	$(PROFILE_ENV) $(COMPOSE) ps
+
+# ============================================================================
+# LIFECYCLE (Selected Services) — use SERVICES="a b"
+# ============================================================================
+.PHONY: compose-up-svc
+compose-up-svc: ## Up one or more specific services
+	$(PROFILE_ENV) $(COMPOSE) up -d $(SERVICES)
+
+.PHONY: compose-restart-svc
+compose-restart-svc: ## Restart one or more specific services
+	$(PROFILE_ENV) $(COMPOSE) restart $(SERVICES)
+
+.PHONY: compose-stop-svc
+compose-stop-svc: ## Stop one or more specific services
+	$(PROFILE_ENV) $(COMPOSE) stop $(SERVICES)
+
+# ============================================================================
+# LOGS
+# ============================================================================
+.PHONY: compose-logs
+compose-logs: ## Tail logs for all active services (respects PROFILES)
+	$(PROFILE_ENV) $(COMPOSE) logs -f --tail=$(TAIL) $(if $(SINCE),--since $(SINCE),)
+
+.PHONY: compose-logs-all
+compose-logs-all: ## Shortcut to tail logs for base services + all profiles
+	COMPOSE_PROFILES=$(ALL_PROFILES) $(COMPOSE) logs -f --tail=$(TAIL) $(if $(SINCE),--since $(SINCE),)
+
+.PHONY: compose-logs-once
+compose-logs-once: ## Show a snapshot of logs (no follow)
+	$(PROFILE_ENV) $(COMPOSE) logs --tail=$(TAIL) $(if $(SINCE),--since $(SINCE),)
+
+.PHONY: compose-logs-svc
+compose-logs-svc: ## Tail logs for specific services
+	$(PROFILE_ENV) $(COMPOSE) logs -f --tail=$(TAIL) $(if $(SINCE),--since $(SINCE),) $(SERVICES)
+
+.PHONY: compose-logs-svc-once
+compose-logs-svc-once: ## Show a snapshot of logs for specific services
+	$(PROFILE_ENV) $(COMPOSE) logs --tail=$(TAIL) $(if $(SINCE),--since $(SINCE),) $(SERVICES)
+
+# ============================================================================
+# EXEC & SHELL
+# ============================================================================
+.PHONY: compose-exec
+compose-exec: ## Execute a command in a container (default: $(SERVICE))
+	$(PROFILE_ENV) $(COMPOSE) exec $(SERVICE) sh -lc '$(CMD)'
+
+.PHONY: compose-shell
+compose-shell: ## Open a shell in a container (default: $(SERVICE))
+	@echo "Opening shell in service: $(SERVICE)..."
+	@if $(PROFILE_ENV) $(COMPOSE) exec $(SERVICE) bash -lc 'exit' 2>/dev/null; then \
+		$(PROFILE_ENV) $(COMPOSE) exec $(SERVICE) bash; \
+	else \
+		$(PROFILE_ENV) $(COMPOSE) exec $(SERVICE) sh; \
+	fi
+
+# ============================================================================
+# CONFIG & HEALTH
+# ============================================================================
+.PHONY: compose-config
+compose-config: ## Show the resolved Docker Compose configuration
+	$(PROFILE_ENV) $(COMPOSE) config
+
+.PHONY: compose-health
+compose-health: ## Probe the application health check endpoint
+	@if curl -fsS "http://localhost:$(APP_PORT)/health" >/dev/null; then \
+		echo "$(GREEN)OK: /health$(NC)"; \
+	else \
+		if curl -fsS "http://localhost:$(APP_PORT)/health.php" >/dev/null; then \
+			echo "$(GREEN)OK: /health.php$(NC)"; \
+		else \
+			echo "$(RED)Health endpoint is not responding$(NC)"; exit 1; \
+		fi; \
+	fi
+
+.PHONY: compose-open
+compose-open: ## Open the app, Prometheus, and Grafana in the browser
+	@URL_APP="http://localhost:$(APP_PORT)"; \
+	URL_PROM="http://localhost:$(PROMETHEUS_PORT)"; \
+	URL_GRAF="http://localhost:$(GRAFANA_PORT)"; \
+	echo "$(CYAN)Opening App:$(NC) $$URL_APP"; \
+	echo "$(CYAN)Opening Prometheus:$(NC) $$URL_PROM"; \
+	echo "$(CYAN)Opening Grafana:$(NC) $$URL_GRAF"; \
+	if command -v wslview >/dev/null; then \
+		wslview $$URL_APP; wslview $$URL_PROM; wslview $$URL_GRAF; \
+	elif grep -qEi "(Microsoft|WSL)" /proc/version; then \
+		explorer.exe $$URL_APP; explorer.exe $$URL_PROM; explorer.exe $$URL_GRAF; \
+	elif command -v xdg-open >/dev/null; then \
+		xdg-open $$URL_APP; xdg-open $$URL_PROM; xdg-open $$URL_GRAF; \
+	elif command -v open >/dev/null; then \
+		open $$URL_APP; open $$URL_PROM; open $$URL_GRAF; \
+	else \
+		echo "Please open manually: $$URL_APP, $$URL_PROM, and $$URL_GRAF"; \
+	fi
