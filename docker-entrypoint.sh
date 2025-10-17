@@ -192,26 +192,6 @@ else
     log_info "Application detected at /var/www/html/public/index.php - skipping demo installation"
 fi
 
-# Create health check endpoint if doesn't exist
-if [ ! -f "/var/www/html/public/health.php" ]; then
-    log_info "Installing health check endpoint..."
-    
-    # Copy from template if exists, otherwise create basic fallback
-    if [ -f "/usr/local/share/php-api-stack/health.php" ]; then
-        cp /usr/local/share/php-api-stack/health.php /var/www/html/public/health.php
-        log_info "Health check installed from template"
-    else
-        log_warning "Health check template not found, creating basic fallback"
-        cat > /var/www/html/public/health.php << 'EOF'
-<?php
-header('Content-Type: application/json');
-echo json_encode(['status' => 'healthy', 'timestamp' => date('c')], JSON_PRETTY_PRINT);
-EOF
-    fi
-    
-    chown nginx:nginx /var/www/html/public/health.php
-    chmod 644 /var/www/html/public/health.php
-fi
 
 # Create health check endpoint if doesn't exist
 if [ ! -f "/var/www/html/public/health.php" ]; then
