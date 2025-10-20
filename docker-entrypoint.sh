@@ -171,23 +171,30 @@ if [ -f "/var/www/html/bin/console" ]; then
     fi
 fi
 
-# Install demo index.php if no application is mounted
+# Install demo index.php if no application is mounted AND DEMO_MODE is enabled
 if [ ! -f "/var/www/html/public/index.php" ]; then
-    log_info "No application detected. Installing demo landing page..."
-    
-    if [ -f "/usr/local/share/php-api-stack/index.php" ]; then
-        cp /usr/local/share/php-api-stack/index.php /var/www/html/public/index.php
-        log_info "Demo landing page installed"
-    else
-        log_warning "Demo template not found, creating basic fallback"
-        cat > /var/www/html/public/index.php << 'EOF'
+    if [ "${DEMO_MODE}" = "true" ]; then
+        log_info "DEMO_MODE enabled. Installing demo landing page..."
+        
+        # Create directory if it doesn't exist
+        mkdir -p /var/www/html/public
+        
+        if [ -f "/usr/local/share/php-api-stack/index.php" ]; then
+            cp /usr/local/share/php-api-stack/index.php /var/www/html/public/index.php
+            log_info "Demo landing page installed"
+        else
+            log_warning "Demo template not found, creating basic fallback"
+            cat > /var/www/html/public/index.php << 'EOF'
 <?php
 phpinfo();
 EOF
+        fi
+        
+        chown nginx:nginx /var/www/html/public/index.php
+        chmod 644 /var/www/html/public/index.php
+    else
+        log_info "No application detected and DEMO_MODE not enabled - skipping demo installation"
     fi
-    
-    chown nginx:nginx /var/www/html/public/index.php
-    chmod 644 /var/www/html/public/index.php
 else
     log_info "Application detected at /var/www/html/public/index.php - skipping demo installation"
 fi
