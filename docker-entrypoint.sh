@@ -202,23 +202,33 @@ fi
 
 # Create health check endpoint if doesn't exist
 if [ ! -f "/var/www/html/public/health.php" ]; then
-    log_info "Installing health check endpoint..."
-    
-    # Copy from template if exists, otherwise create basic fallback
-    if [ -f "/usr/local/share/php-api-stack/health.php" ]; then
-        cp /usr/local/share/php-api-stack/health.php /var/www/html/public/health.php
-        log_info "Health check installed from template"
-    else
-        log_warning "Health check template not found, creating basic fallback"
-        cat > /var/www/html/public/health.php << 'EOF'
+    # Apenas instala health check se habilitado ou se DEMO_MODE estiver ativo
+    if [ "${HEALTH_CHECK_INSTALL}" = "true" ] || [ "${DEMO_MODE}" = "true" ]; then
+        log_info "Installing health check endpoint..."
+        
+        # Cria diretório se não existir
+        mkdir -p /var/www/html/public
+        
+        # Copy from template if exists, otherwise create basic fallback
+        if [ -f "/usr/local/share/php-api-stack/health.php" ]; then
+            cp /usr/local/share/php-api-stack/health.php /var/www/html/public/health.php
+            log_info "Health check installed from template"
+        else
+            log_warning "Health check template not found, creating basic fallback"
+            cat > /var/www/html/public/health.php << 'EOF'
 <?php
 header('Content-Type: application/json');
 echo json_encode(['status' => 'healthy', 'timestamp' => date('c')], JSON_PRETTY_PRINT);
 EOF
+        fi
+        
+        chown nginx:nginx /var/www/html/public/health.php
+        chmod 644 /var/www/html/public/health.php
+    else
+        log_info "HEALTH_CHECK_INSTALL not enabled - skipping health check installation"
     fi
-    
-    chown nginx:nginx /var/www/html/public/health.php
-    chmod 644 /var/www/html/public/health.php
+else
+    log_info "Health check already exists at /var/www/html/public/health.php"
 fi
 
 # Set up log rotation apenas uma vez
