@@ -288,6 +288,13 @@ if [ "${APP_ENV}" = "production" ] || [ "${APP_ENV}" = "prod" ]; then
     fi
 fi
 
+# # Git safe directory fix for mounted volumes
+if [ "$1" != "bash" ] && [ "$1" != "sh" ]; then 
+    log_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
+    log_info "Fixing git safe directory for mounted volumes..."
+    git config --global --add safe.directory /var/www/html || true
+fi
+
 # ==============================================================================
 # START SERVICES BASED ON COMMAND
 # ==============================================================================

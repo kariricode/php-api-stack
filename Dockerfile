@@ -38,6 +38,10 @@ SHELL ["/bin/ash", "-o", "pipefail", "-c"]
 
 # Propagate build args to this stage
 ARG PHP_VERSION
+ARG PHP_OPCACHE_VALIDATE_TIMESTAMPS
+ARG PHP_OPCACHE_MAX_ACCELERATED_FILES
+ARG PHP_OPCACHE_ENABLE
+ARG PHP_OPCACHE_MEMORY_CONSUMPTION
 ARG NGINX_VERSION
 ARG REDIS_VERSION
 ARG ALPINE_VERSION
@@ -67,10 +71,10 @@ LABEL maintainer="KaririCode <community@kariricode.org>" \
 ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_HOME=/composer \
     PATH="/composer/vendor/bin:/symfony/bin:/usr/local/bin:/usr/sbin:/sbin:$PATH" \
-    PHP_OPCACHE_VALIDATE_TIMESTAMPS=0 \
-    PHP_OPCACHE_MAX_ACCELERATED_FILES=20000 \
-    PHP_OPCACHE_MEMORY_CONSUMPTION=256 \
-    PHP_OPCACHE_ENABLE=1 \
+    PHP_OPCACHE_VALIDATE_TIMESTAMPS=${PHP_OPCACHE_VALIDATE_TIMESTAMPS} \
+    PHP_OPCACHE_MAX_ACCELERATED_FILES=${PHP_OPCACHE_MAX_ACCELERATED_FILES} \
+    PHP_OPCACHE_MEMORY_CONSUMPTION=${PHP_OPCACHE_MEMORY_CONSUMPTION} \
+    PHP_OPCACHE_ENABLE=${PHP_OPCACHE_ENABLE} \
     STACK_VERSION=${VERSION}
 
 # ------------------------------------------------------------
@@ -83,10 +87,12 @@ RUN set -eux; \
     # network / TLS
     apk add --no-cache git curl wget ca-certificates openssl; \
     # misc runtime libs
-    apk add --no-cache gettext tzdata pcre2 zlib; \
+    apk add --no-cache gettext tzdata pcre2 zlib unzip; \
     # image/zip/xml/icu
     apk add --no-cache icu-libs libzip libpng libjpeg-turbo freetype libxml2; \
-    update-ca-certificates
+    update-ca-certificates \
+    \
+    git config --global --add safe.directory /var/www/html
 
 # ------------------------------------------------------------
 # Users & directories (least privilege)
@@ -138,6 +144,7 @@ RUN set -eux; \
     # Intentional word splitting for extension list
     # shellcheck disable=SC2086
     docker-php-ext-install -j"$(nproc)" ${PHP_CORE_EXTENSIONS}; \
+    apk del .build-deps; \
     php -m | sed 's/^/  -> /'
 
 # ------------------------------------------------------------

@@ -346,6 +346,9 @@ final class RedisCheck extends AbstractHealthCheck
 
         $redis = new \Redis();
 
+        $host = getenv('REDIS_HOST') ?: '127.0.0.1';
+        $password = getenv('REDIS_PASSWORD') ?: null;
+
         try {
             $connectStart = microtime(true);
             $connected = @$redis->connect('127.0.0.1', 6379, self::TIMEOUT);
@@ -360,6 +363,17 @@ final class RedisCheck extends AbstractHealthCheck
                     ],
                     'error' => 'Cannot connect to Redis',
                 ];
+            }
+
+            if ($password !== null && $password !== '') {
+                if (!@$redis->auth($password)) {
+                    return [
+                        'healthy' => false,
+                        'status' => 'unauthenticated',
+                        'details' => ['host' => $host],
+                        'error' => 'Redis authentication failed (NOAUTH). Check REDIS_PASSWORD.',
+                    ];
+                }
             }
 
             $pingStart = microtime(true);
