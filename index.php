@@ -171,6 +171,9 @@ final class RedisCheck extends AbstractComponentCheck
 
         $redis = new \Redis();
 
+        $host = getenv('REDIS_HOST') ?: '127.0.0.1';
+        $password = getenv('REDIS_PASSWORD') ?: null;
+
         try {
             $connected = @$redis->connect('127.0.0.1', 6379, 1.0);
 
@@ -181,6 +184,18 @@ final class RedisCheck extends AbstractComponentCheck
                     details: []
                 );
             }
+
+
+            if ($password !== null && $password !== '') {
+                if (!@$redis->auth($password)) {
+                    return new StatusResult(
+                        healthy: false,
+                        message: 'Redis authentication failed (NOAUTH). Check REDIS_PASSWORD.',
+                        details: ['host' => $host]
+                    );
+                }
+            }
+
 
             $pong = $redis->ping();
 

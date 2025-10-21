@@ -2,20 +2,28 @@
 # Usage: make [target]
 
 # =============================================================
-# Variables
+# VARIABLES
 # =============================================================
 DOCKER_HUB_USER := kariricode
 IMAGE_NAME      := php-api-stack
 VERSION         := $(shell cat VERSION 2>/dev/null || echo "1.2.0")
 FULL_IMAGE      := $(DOCKER_HUB_USER)/$(IMAGE_NAME)
 
+ENV_FILE ?= .env
+ifneq ("$(wildcard $(ENV_FILE))","")
+	include $(ENV_FILE)
+	export $(shell sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' $(ENV_FILE))
+endif
+
 # Container names
 LOCAL_CONTAINER := $(IMAGE_NAME)-local
+DEV_CONTAINER := $(IMAGE_NAME)-dev
 TEST_CONTAINER  := $(IMAGE_NAME)-test
 CI_TEST_CONTAINER := $(IMAGE_NAME)-ci-test
 
 # Ports (can be overridden: e.g., make run LOCAL_PORT=8000)
 LOCAL_PORT ?= 8080
+DEV_PORT   ?= 8001
 TEST_PORT  ?= 8081
 
 # Version tags
@@ -58,8 +66,23 @@ BUILD_ARGS := \
     --build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --build-arg VCS_REF=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
+# toggles development-specific build args
+IMAGE_TAG ?= dev
+XDEBUG_ENABLE ?= 0
+APP_ENV ?= development
+APP_DEBUG ?= true
+DEMO_MODE ?= true
+HEALTH_CHECK_INSTALL ?= true
+
+DEV_BUILD_ARGS := \
+--build-arg APP_ENV=$(APP_ENV) \
+--build-arg APP_DEBUG=$(APP_DEBUG) \
+--build-arg DEMO_MODE=$(DEMO_MODE) \
+--build-arg HEALTH_CHECK_INSTALL=$(HEALTH_CHECK_INSTALL) \
+--build-arg ENABLE_XDEBUG=$(XDEBUG_ENABLE)
+
 # =============================================================
-# Help
+# HELP
 # =============================================================
 .PHONY: help
 help: ## Show this help message
@@ -77,15 +100,28 @@ help: ## Show this help message
 	@echo "$(MAGENTA)═══ RUNTIME TARGETS ═══$(NC)"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v "^#" | awk 'BEGIN {FS = ":.*?## "}; /^run/ || /^stop$$/ || /^restart/ || /^logs$$/ || /^exec/ || /^shell$$/ {printf "  $(YELLOW)%-22s$(NC) %s\n", $$1, $$2}'
 	@echo ""
+	@echo "$(MAGENTA)═══ DOCKER COMPOSE TARGETS (from Makefile.compose) ═══$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v "^#" | awk 'BEGIN {FS = ":.*?## "}; /^compose-/ {printf "  $(YELLOW)%-22s$(NC) %s\n", $$1, $$2}'
+	@echo ""
 	@echo "$(MAGENTA)═══ UTILITY TARGETS ═══$(NC)"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v "^#" | awk 'BEGIN {FS = ":.*?## "}; /version/ || /bump/ || /push/ || /release/ || /clean/ || /info/ || /stats/ {printf "  $(YELLOW)%-22s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "$(BLUE)Quick Start Examples:$(NC)"
-	@echo "  $(CYAN)make build$(NC)           # Build production image"
-	@echo "  $(CYAN)make build-dev$(NC)       # Build dev image (Symfony CLI/Xdebug opt.)"
-	@echo "  $(CYAN)make run$(NC)             # Run local container on port $(LOCAL_PORT)"
-	@echo "  $(CYAN)make run-test$(NC)        # Run test container on port $(TEST_PORT) with comprehensive health"
-	@echo "  $(CYAN)make release$(NC)         # Full release pipeline"
+	@echo "  $(CYAN)make build$(NC)            # Build production image"
+	@echo "  $(CYAN)make build-dev$(NC)        # Build dev image (Symfony CLI/Xdebug opt.)"
+	@echo "  $(CYAN)make push$(NC)             # Push production image to Docker Hub"
+	@echo "  $(CYAN)make push-dev$(NC)         # Push dev image to Docker Hub"
+	@echo "  $(CYAN)make publish-dev$(NC)      # Publish dev image to Docker Hub"
+	@echo "  $(CYAN)make run-dev$(NC)          # Run dev container"
+	@echo "  $(CYAN)make build-test-image$(NC) # Build test image"
+	@echo "  $(CYAN)make test-quick$(NC)       # Quick test of built image"
+	@echo "  $(CYAN)make test$(NC)             # Run comprehensive tests"
+	@echo "  $(CYAN)make run$(NC)              # Run local container on port $(LOCAL_PORT)"
+	@echo "  $(CYAN)make run-test$(NC)         # Run test container on port $(TEST_PORT) with comprehensive health"
+	@echo "  $(CYAN)make release$(NC)          # Full release pipeline"
+	@echo "  $(CYAN)make compose-help$(NC)     # Show help for Docker Compose commands"
+	@echo "  $(CYAN)make compose-up-all$(NC)   # Start all Docker Compose services"
+	@echo "  $(CYAN)make compose-down-v$(NC)   # Stop all Docker Compose services"
 
 # =============================================================
 # BUILD TARGETS
@@ -106,20 +142,19 @@ build: ## Build the Docker image locally (production)
 build-no-cache: ## Build without using cache (production)
 	@echo "$(GREEN)Building Docker image (no cache)...$(NC)"
 	@if [ $(HAVE_BUILD_SCRIPT) -eq 1 ]; then \
-		$(BUILD_SCRIPT) --no-cache --version=$(VERSION); \
+		$(BUILD_SCRIPT) --no-cache --version=$(VERSION); \	
 	else \
 		docker build --no-cache $(BUILD_ARGS) -t $(FULL_IMAGE):$(VERSION) . && \
 		docker tag $(FULL_IMAGE):$(VERSION) $(FULL_IMAGE):latest; \
-	fi
+		fi
 	@echo "$(GREEN)✓ Build complete!$(NC)"
 
 .PHONY: build-dev
-build-dev: ## Build development image (target=dev, optional Xdebug ENABLE_XDEBUG=1)
+build-dev: ## Build development image (target via BUILD_TARGET, tag via IMAGE_TAG)
 	@echo "$(GREEN)Building development Docker image...$(NC)"
-	@docker build $(BUILD_ARGS) --target dev \
-		--build-arg ENABLE_XDEBUG=$(or $(ENABLE_XDEBUG),0) \
-		-t $(FULL_IMAGE):dev .
-	@echo "$(GREEN)✓ Dev image built as $(FULL_IMAGE):dev$(NC)"
+	@docker build --no-cache $(BUILD_ARGS) $(DEV_BUILD_ARGS) \
+	-t $(FULL_IMAGE):$(IMAGE_TAG) .
+	@echo "$(GREEN)✓ Dev image built as $(FULL_IMAGE):$(IMAGE_TAG)$(NC)"
 
 .PHONY: build-test-image
 build-test-image: ## Build test image (production base) with comprehensive health check
@@ -129,159 +164,31 @@ build-test-image: ## Build test image (production base) with comprehensive healt
 	@echo "$(GREEN)✓ Test image built: $(FULL_IMAGE):test$(NC)"
 
 # =============================================================
-# TEST TARGETS
+# PUSH & PUBLISH TARGETS
 # =============================================================
-.PHONY: test-quick
-test-quick: ## Quick test of built image (versions only)
-	@echo "$(GREEN)Running quick version tests...$(NC)"
-	@echo "\n$(CYAN)Testing PHP:$(NC)"
-	@docker run --rm --entrypoint php $(FULL_IMAGE):latest -v | head -2
-	@echo "\n$(CYAN)Testing Nginx:$(NC)"
-	@docker run --rm --entrypoint nginx $(FULL_IMAGE):latest -v 2>&1 | head -1
-	@echo "\n$(CYAN)Testing Redis:$(NC)"
-	@docker run --rm --entrypoint redis-server $(FULL_IMAGE):latest --version
-	@echo "\n$(CYAN)Testing Composer:$(NC)"
-	@docker run --rm --entrypoint composer $(FULL_IMAGE):latest --version --no-ansi | head -1
-	@echo "\n$(GREEN)✓ All components verified!$(NC)"
+.PHONY: push
+push: ## Push the image to Docker Hub
+	@echo "$(GREEN)Pushing to Docker Hub...$(NC)"
+	@echo "Pushing $(FULL_IMAGE):$(VERSION)..."
+	@docker push $(FULL_IMAGE):$(VERSION)
+	@docker push $(FULL_IMAGE):latest || true
+	@docker push $(FULL_IMAGE):$(MAJOR_VERSION) || true
+	@docker push $(FULL_IMAGE):$(MINOR_VERSION) || true
+	@echo "$(GREEN)✓ Push complete!$(NC)"
+	@echo "Available at: https://hub.docker.com/r/$(FULL_IMAGE)"
 
-.PHONY: test
-test: ## Run comprehensive tests on the production image
-	@echo "$(GREEN)Running comprehensive tests...$(NC)"
-	@echo "\n$(YELLOW)[1/5] Testing component versions...$(NC)"
-	@$(MAKE) test-quick --no-print-directory
-	@echo "\n$(YELLOW)[2/5] Testing configuration processing...$(NC)"
-	@docker run --rm $(FULL_IMAGE):latest /usr/local/bin/process-configs
-	@echo "\n$(YELLOW)[3/5] Testing Nginx configuration...$(NC)"
-	@docker run --rm --entrypoint nginx $(FULL_IMAGE):latest -t
-	@echo "\n$(YELLOW)[4/5] Testing PHP-FPM configuration...$(NC)"
-	@docker run --rm --entrypoint php-fpm $(FULL_IMAGE):latest -t
-	@echo "\n$(YELLOW)[5/5] Testing health endpoint...$(NC)"
-	@docker run -d --name $(CI_TEST_CONTAINER) -p $(TEST_PORT):80 $(FULL_IMAGE):latest >/dev/null
-	@echo "Waiting for container to start on port $(TEST_PORT)..."
-	@tries=0; while ! curl -s -f -o /dev/null http://localhost:$(TEST_PORT)/health; do \
-		sleep 2; \
-		tries=$$(($$tries + 1)); \
-		if [ $$tries -ge 15 ]; then \
-			echo "$(RED)✗ Health check failed: Container did not become healthy in time.$(NC)"; \
-			docker logs $(CI_TEST_CONTAINER); \
-			docker stop $(CI_TEST_CONTAINER) >/dev/null; \
-			docker rm $(CI_TEST_CONTAINER) >/dev/null; \
-			exit 1; \
-		fi; \
-	done
-	@echo "$(GREEN)✓ Health check passed$(NC)"
-	@docker stop $(CI_TEST_CONTAINER) >/dev/null
-	@docker rm $(CI_TEST_CONTAINER) >/dev/null
-	@echo "\n$(GREEN)✓ All tests complete!$(NC)"
+.PHONY: push-dev
+push-dev: ## Push dev image to Docker Hub (default IMAGE_TAG=dev)
+	@echo "$(GREEN)Pushing dev image to Docker Hub...$(NC)"
+	@docker push $(FULL_IMAGE):$(IMAGE_TAG)
+	@echo "$(GREEN)✓ Pushed: $(FULL_IMAGE):$(IMAGE_TAG)$(NC)"
 
-.PHONY: run-test
-run-test: build-test-image ## Run test container (comprehensive health)
-	@echo "$(GREEN)Starting test container...$(NC)"
-	@docker stop $(TEST_CONTAINER) >/dev/null 2>&1 || true
-	@docker rm $(TEST_CONTAINER) >/dev/null 2>&1 || true
-	@docker run -d \
-		--name $(TEST_CONTAINER) \
-		-p $(TEST_PORT):80 \
-		--env-file .env \
-		-v $(PWD)/logs:/var/log \
-		$(FULL_IMAGE):test
-	@echo "\n$(GREEN)✓ Test container running!$(NC)"
-	@echo "$(CYAN)════════════════════════════════════════$(NC)"
-	@echo "$(CYAN)Container:$(NC)    $(TEST_CONTAINER)"
-	@echo "$(CYAN)URL:$(NC)           http://localhost:$(TEST_PORT)"
-	@echo "$(CYAN)Health Check:$(NC) http://localhost:$(TEST_PORT)/health"
-	@echo "$(CYAN)════════════════════════════════════════$(NC)"
-	@echo "\n$(YELLOW)⏳ Waiting for services to start...$(NC)"; sleep 5
-	@echo "\n$(CYAN)Testing comprehensive health endpoint...$(NC)"
-	@curl -s http://localhost:$(TEST_PORT)/health || true
-
-.PHONY: test-health
-test-health: ## Test comprehensive health check endpoint
-	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
-		echo "$(RED)Test container not running!$(NC)"; \
-		echo "Run '$(CYAN)make run-test$(NC)' first."; \
-		exit 1; \
-	fi
-	@curl -s http://localhost:$(TEST_PORT)/health.php | jq '.' || curl -s http://localhost:$(TEST_PORT)/health
-
-.PHONY: test-health-status
-test-health-status: ## Show health check status summary
-	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
-		echo "$(RED)Test container not running!$(NC)"; exit 1; \
-	fi
-	@echo "$(GREEN)Health Check Status Summary$(NC)"
-	@echo "$(CYAN)════════════════════════════════════════$(NC)"
-	@curl -s http://localhost:$(TEST_PORT)/health.php | jq -r '"Overall: \(.status | ascii_upcase)"' || true
-	@curl -s http://localhost:$(TEST_PORT)/health.php | jq -r '"Duration: \(.duration_ms // "n/a")ms"' || true
-	@echo ""; echo "$(CYAN)Component Status:$(NC)"; \
-	curl -s http://localhost:$(TEST_PORT)/health.php | jq -r '.checks | to_entries[] | "  \(.key | ascii_upcase): \(.value.status)"' || true
-
-.PHONY: test-health-watch
-test-health-watch: ## Watch health check status (updates every 5s)
-	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
-		echo "$(RED)Test container not running!$(NC)"; \
-		echo "Run '$(CYAN)make run-test$(NC)' first."; \
-		exit 1; \
-	fi
-	@echo "$(GREEN)Watching health status (Ctrl+C to stop)...$(NC)"; echo ""
-	@watch -n 5 "curl -s http://localhost:$(TEST_PORT)/health.php | jq '{overall: .status, duration_ms: .duration_ms, checks: (.checks // {})}'"
-
-.PHONY: stop-test
-stop-test: ## Stop and remove test container
-	@echo "$(YELLOW)Stopping test container...$(NC)"
-	@docker stop $(TEST_CONTAINER) >/dev/null 2>&1 || true
-	@docker rm $(TEST_CONTAINER) >/dev/null 2>&1 || true
-	@echo "$(GREEN)✓ Test container stopped$(NC)"
-
-.PHONY: logs-test
-logs-test: ## Show logs from test container
-	@if [ -z "$$(docker ps -a -q -f name=$(TEST_CONTAINER))" ]; then \
-		echo "$(RED)Test container not found!$(NC)"; \
-		echo "Run '$(CYAN)make run-test$(NC)' first."; \
-	else \
-		echo "$(GREEN)Showing logs for $(TEST_CONTAINER)...$(NC)"; \
-		docker logs -f $(TEST_CONTAINER); \
-	fi
-
-.PHONY: shell-test
-shell-test: ## Execute bash in test container
-	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
-		echo "$(RED)Test container not running!$(NC)"; \
-		echo "Run '$(CYAN)make run-test$(NC)' first."; \
-	else \
-		docker exec -it $(TEST_CONTAINER) bash; \
-	fi
+.PHONY: publish-dev
+publish-dev: build-dev push-dev ## Build + Push dev image
+	@echo "$(GREEN)✓ Dev image published: $(FULL_IMAGE):$(IMAGE_TAG)$(NC)"
 
 # =============================================================
-# VALIDATION TARGETS
-# =============================================================
-.PHONY: test-structure
-test-structure: ## Test container structure and files
-	@echo "$(GREEN)Testing container structure...$(NC)"
-	@docker run --rm $(FULL_IMAGE):latest ls -la /var/www/html/public/ || true
-	@docker run --rm $(FULL_IMAGE):latest ls -la /etc/nginx/ || true
-	@docker run --rm $(FULL_IMAGE):latest ls -la /usr/local/etc/php/ || true
-
-.PHONY: scan
-scan: ## Scan the image for vulnerabilities using Trivy
-	@echo "$(GREEN)Scanning for vulnerabilities...$(NC)"
-	@if command -v trivy >/dev/null 2>&1; then \
-		trivy image --severity HIGH,CRITICAL $(FULL_IMAGE):latest; \
-	else \
-		docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL $(FULL_IMAGE):latest; \
-	fi
-
-.PHONY: lint
-lint: ## Lint the Dockerfile with hadolint
-	@echo "$(GREEN)Linting Dockerfile...$(NC)"
-	@if command -v hadolint >/dev/null 2>&1; then \
-		hadolint Dockerfile || true; \
-	else \
-		docker run --rm -i hadolint/hadolint < Dockerfile || true; \
-	fi
-
-# =============================================================
-# RUNTIME TARGETS
+# RUNTIME TARGETS - RUN
 # =============================================================
 .PHONY: run
 run: ## Run local container for demo/testing
@@ -335,6 +242,49 @@ run-with-app: ## Run local container with mounted application
 	@echo "  2. Run $(CYAN)docker exec $(LOCAL_CONTAINER) nginx -s reload$(NC)"
 	@echo "  3. Visit http://localhost:$(LOCAL_PORT)"
 
+.PHONY: run-dev
+run-dev: ## Run dev container (port 8001, or override: make run-dev DEV_PORT=9000)
+	@echo "$(GREEN)Starting dev container...$(NC)"
+	@docker stop $(DEV_CONTAINER) >/dev/null 2>&1 || true
+	@docker rm $(DEV_CONTAINER) >/dev/null 2>&1 || true
+	@if docker ps --format '{{.Ports}}' | grep -q '$(DEV_PORT)->'; then \
+		echo "$(RED)✗ Port $(DEV_PORT) is already in use!$(NC)"; \
+		echo "$(YELLOW)Try another port:$(NC) make run-dev DEV_PORT=9000"; \
+		exit 1; \
+	fi
+	@docker run -d \
+		--name $(DEV_CONTAINER) \
+		-p $(DEV_PORT):80 \
+		--env-file $(ENV_FILE) \
+		-v $(PWD)/logs:/var/log \
+		$(FULL_IMAGE):$(IMAGE_TAG)
+	@echo "$(GREEN)✓ Dev container running at http://localhost:$(DEV_PORT)$(NC)"
+
+
+.PHONY: run-test
+run-test: build-test-image ## Run test container (comprehensive health)
+	@echo "$(GREEN)Starting test container...$(NC)"
+	@docker stop $(TEST_CONTAINER) >/dev/null 2>&1 || true
+	@docker rm $(TEST_CONTAINER) >/dev/null 2>&1 || true
+	@docker run -d \
+		--name $(TEST_CONTAINER) \
+		-p $(TEST_PORT):80 \
+		--env-file .env \
+		-v $(PWD)/logs:/var/log \
+		$(FULL_IMAGE):test
+	@echo "\n$(GREEN)✓ Test container running!$(NC)"
+	@echo "$(CYAN)════════════════════════════════════════$(NC)"
+	@echo "$(CYAN)Container:$(NC)    $(TEST_CONTAINER)"
+	@echo "$(CYAN)URL:$(NC)           http://localhost:$(TEST_PORT)"
+	@echo "$(CYAN)Health Check:$(NC) http://localhost:$(TEST_PORT)/health"
+	@echo "$(CYAN)════════════════════════════════════════$(NC)"
+	@echo "\n$(YELLOW)⏳ Waiting for services to start...$(NC)"; sleep 5
+	@echo "\n$(CYAN)Testing comprehensive health endpoint...$(NC)"
+	@curl -s http://localhost:$(TEST_PORT)/health || true
+
+# =============================================================
+# RUNTIME TARGETS - STOP & RESTART
+# =============================================================
 .PHONY: stop
 stop: ## Stop and remove local container
 	@echo "$(YELLOW)Stopping local container...$(NC)"
@@ -342,9 +292,32 @@ stop: ## Stop and remove local container
 	@docker rm $(LOCAL_CONTAINER) >/dev/null 2>&1 || true
 	@echo "$(GREEN)✓ Container stopped$(NC)"
 
+.PHONY: stop-dev
+stop-dev: ## Stop and remove dev container
+	@echo "$(YELLOW)Stopping dev container...$(NC)"
+	@docker stop $(DEV_CONTAINER) >/dev/null 2>&1 || true
+	@docker rm $(DEV_CONTAINER) >/dev/null 2>&1 || true
+	@echo "$(GREEN)✓ Dev container stopped$(NC)"
+
+.PHONY: stop-test
+stop-test: ## Stop and remove test container
+	@echo "$(YELLOW)Stopping test container...$(NC)"
+	@docker stop $(TEST_CONTAINER) >/dev/null 2>&1 || true
+	@docker rm $(TEST_CONTAINER) >/dev/null 2>&1 || true
+	@echo "$(GREEN)✓ Test container stopped$(NC)"
+
 .PHONY: restart
 restart: stop run ## Restart the local container
 
+.PHONY: restart-dev
+restart-dev: stop-dev run-dev ## Restart the dev container
+
+.PHONY: restart-test
+restart-test: stop-test run-test ## Restart the test container
+
+# =============================================================
+# RUNTIME TARGETS - LOGS & SHELL
+# =============================================================
 .PHONY: logs
 logs: ## Show logs from local container
 	@if [ -z "$$(docker ps -a -q -f name=$(LOCAL_CONTAINER))" ]; then \
@@ -355,6 +328,29 @@ logs: ## Show logs from local container
 		docker logs -f $(LOCAL_CONTAINER); \
 	fi
 
+.PHONY: logs-dev
+logs-dev: ## Show logs from dev container
+	@if [ -z "$$(docker ps -a -q -f name=$(DEV_CONTAINER))" ]; then \
+		echo "$(RED)Dev container not found!$(NC)"; \
+		echo "Run '$(CYAN)make run-dev$(NC)' first."; \
+	else \
+		echo "$(GREEN)Showing logs for $(DEV_CONTAINER)...$(NC)"; \
+		docker logs -f $(DEV_CONTAINER); \
+	fi
+
+.PHONY: logs-test
+logs-test: ## Show logs from test container
+	@if [ -z "$$(docker ps -a -q -f name=$(TEST_CONTAINER))" ]; then \
+		echo "$(RED)Test container not found!$(NC)"; \
+		echo "Run '$(CYAN)make run-test$(NC)' first."; \
+	else \
+		echo "$(GREEN)Showing logs for $(TEST_CONTAINER)...$(NC)"; \
+		docker logs -f $(TEST_CONTAINER); \
+	fi
+
+.PHONY: shell
+shell: exec ## Alias for exec
+
 .PHONY: exec
 exec: ## Execute bash in the running local container
 	@if [ -z "$$(docker ps -q -f name=$(LOCAL_CONTAINER))" ]; then \
@@ -364,8 +360,128 @@ exec: ## Execute bash in the running local container
 		docker exec -it $(LOCAL_CONTAINER) bash; \
 	fi
 
-.PHONY: shell
-shell: exec ## Alias for exec
+.PHONY: shell-dev
+shell-dev: ## Execute bash in dev container
+	@if [ -z "$$(docker ps -q -f name=$(DEV_CONTAINER))" ]; then \
+		echo "$(RED)Dev container not running!$(NC)"; \
+		echo "Run '$(CYAN)make run-dev$(NC)' first."; \
+	else \
+		docker exec -it $(DEV_CONTAINER) bash; \
+	fi
+
+.PHONY: shell-test
+shell-test: ## Execute bash in test container
+	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
+		echo "$(RED)Test container not running!$(NC)"; \
+		echo "Run '$(CYAN)make run-test$(NC)' first."; \
+	else \
+		docker exec -it $(TEST_CONTAINER) bash; \
+	fi
+
+# =============================================================
+# TEST TARGETS
+# =============================================================
+.PHONY: test-quick
+test-quick: ## Quick test of built image (versions only)
+	@echo "$(GREEN)Running quick version tests...$(NC)"
+	@echo "\n$(CYAN)Testing PHP:$(NC)"
+	@docker run --rm --entrypoint php $(FULL_IMAGE):latest -v | head -2
+	@echo "\n$(CYAN)Testing Nginx:$(NC)"
+	@docker run --rm --entrypoint nginx $(FULL_IMAGE):latest -v 2>&1 | head -1
+	@echo "\n$(CYAN)Testing Redis:$(NC)"
+	@docker run --rm --entrypoint redis-server $(FULL_IMAGE):latest --version
+	@echo "\n$(CYAN)Testing Composer:$(NC)"
+	@docker run --rm --entrypoint composer $(FULL_IMAGE):latest --version --no-ansi | head -1
+	@echo "\n$(GREEN)✓ All components verified!$(NC)"
+
+.PHONY: test
+test: ## Run comprehensive tests on the production image
+	@echo "$(GREEN)Running comprehensive tests...$(NC)"
+	@echo "\n$(YELLOW)[1/5] Testing component versions...$(NC)"
+	@$(MAKE) test-quick --no-print-directory
+	@echo "\n$(YELLOW)[2/5] Testing configuration processing...$(NC)"
+	@docker run --rm $(FULL_IMAGE):latest /usr/local/bin/process-configs
+	@echo "\n$(YELLOW)[3/5] Testing Nginx configuration...$(NC)"
+	@docker run --rm --entrypoint nginx $(FULL_IMAGE):latest -t
+	@echo "\n$(YELLOW)[4/5] Testing PHP-FPM configuration...$(NC)"
+	@docker run --rm --entrypoint php-fpm $(FULL_IMAGE):latest -t
+	@echo "\n$(YELLOW)[5/5] Testing health endpoint...$(NC)"
+	@docker run -d --name $(CI_TEST_CONTAINER) -p $(TEST_PORT):80 $(FULL_IMAGE):latest >/dev/null
+	@echo "Waiting for container to start on port $(TEST_PORT)..."
+	@tries=0; while ! curl -s -f -o /dev/null http://localhost:$(TEST_PORT)/health; do \
+		sleep 2; \
+		tries=$$(($$tries + 1)); \
+		if [ $$tries -ge 15 ]; then \
+			echo "$(RED)✗ Health check failed: Container did not become healthy in time.$(NC)"; \
+			docker logs $(CI_TEST_CONTAINER); \
+			docker stop $(CI_TEST_CONTAINER) >/dev/null; \
+			docker rm $(CI_TEST_CONTAINER) >/dev/null; \
+			exit 1; \
+		fi; \
+	done
+	@echo "$(GREEN)✓ Health check passed$(NC)"
+	@docker stop $(CI_TEST_CONTAINER) >/dev/null
+	@docker rm $(CI_TEST_CONTAINER) >/dev/null
+	@echo "\n$(GREEN)✓ All tests complete!$(NC)"
+
+.PHONY: test-health
+test-health: ## Test comprehensive health check endpoint
+	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
+		echo "$(RED)Test container not running!$(NC)"; \
+		echo "Run '$(CYAN)make run-test$(NC)' first."; \
+		exit 1; \
+	fi
+	@curl -s http://localhost:$(TEST_PORT)/health.php | jq '.' || curl -s http://localhost:$(TEST_PORT)/health
+
+.PHONY: test-health-status
+test-health-status: ## Show health check status summary
+	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
+		echo "$(RED)Test container not running!$(NC)"; exit 1; \
+	fi
+	@echo "$(GREEN)Health Check Status Summary$(NC)"
+	@echo "$(CYAN)════════════════════════════════════════$(NC)"
+	@curl -s http://localhost:$(TEST_PORT)/health.php | jq -r '"Overall: \(.status | ascii_upcase)"' || true
+	@curl -s http://localhost:$(TEST_PORT)/health.php | jq -r '"Duration: \(.duration_ms // "n/a")ms"' || true
+	@echo ""; echo "$(CYAN)Component Status:$(NC)"; \
+	curl -s http://localhost:$(TEST_PORT)/health.php | jq -r '.checks | to_entries[] | "  \(.key | ascii_upcase): \(.value.status)"' || true
+
+.PHONY: test-health-watch
+test-health-watch: ## Watch health check status (updates every 5s)
+	@if [ -z "$$(docker ps -q -f name=$(TEST_CONTAINER))" ]; then \
+		echo "$(RED)Test container not running!$(NC)"; \
+		echo "Run '$(CYAN)make run-test$(NC)' first."; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)Watching health status (Ctrl+C to stop)...$(NC)"; echo ""
+	@watch -n 5 "curl -s http://localhost:$(TEST_PORT)/health.php | jq '{overall: .status, duration_ms: .duration_ms, checks: (.checks // {})}'"
+
+.PHONY: test-structure
+test-structure: ## Test container structure and files
+	@echo "$(GREEN)Testing container structure...$(NC)"
+	@docker run --rm $(FULL_IMAGE):latest ls -la /var/www/html/public/ || true
+	@docker run --rm $(FULL_IMAGE):latest ls -la /etc/nginx/ || true
+	@docker run --rm $(FULL_IMAGE):latest ls -la /usr/local/etc/php/ || true
+
+# =============================================================
+# VALIDATION TARGETS
+# =============================================================
+.PHONY: scan
+scan: ## Scan the image for vulnerabilities using Trivy
+	@echo "$(GREEN)Scanning for vulnerabilities...$(NC)"
+	@if command -v trivy >/dev/null 2>&1; then \
+		trivy image --severity HIGH,CRITICAL $(FULL_IMAGE):latest; \
+	else \
+		docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image --severity HIGH,CRITICAL $(FULL_IMAGE):latest; \
+	fi
+
+.PHONY: lint
+lint: ## Lint the Dockerfile with hadolint
+	@echo "$(GREEN)Linting Dockerfile...$(NC)"
+	@if command -v hadolint >/dev/null 2>&1; then \
+		hadolint Dockerfile || true; \
+	else \
+		docker run --rm -i hadolint/hadolint < Dockerfile || true; \
+	fi
 
 # =============================================================
 # RELEASE TARGETS
@@ -376,17 +492,6 @@ tag-latest: ## Tag current version as latest/major/minor
 	@docker tag $(FULL_IMAGE):$(VERSION) $(FULL_IMAGE):$(MAJOR_VERSION) || true
 	@docker tag $(FULL_IMAGE):$(VERSION) $(FULL_IMAGE):$(MINOR_VERSION) || true
 	@echo "$(GREEN)✓ Tags created: latest, $(MAJOR_VERSION), $(MINOR_VERSION)$(NC)"
-
-.PHONY: push
-push: ## Push the image to Docker Hub
-	@echo "$(GREEN)Pushing to Docker Hub...$(NC)"
-	@echo "Pushing $(FULL_IMAGE):$(VERSION)..."
-	@docker push $(FULL_IMAGE):$(VERSION)
-	@docker push $(FULL_IMAGE):latest || true
-	@docker push $(FULL_IMAGE):$(MAJOR_VERSION) || true
-	@docker push $(FULL_IMAGE):$(MINOR_VERSION) || true
-	@echo "$(GREEN)✓ Push complete!$(NC)"
-	@echo "Available at: https://hub.docker.com/r/$(FULL_IMAGE)"
 
 .PHONY: release
 release: lint build test scan tag-latest push ## Full release pipeline
@@ -494,4 +599,3 @@ stats: ## Show container resource usage
 # DOCKER-COMPOSE TARGETS (optional include)
 # =============================================================
 -include Makefile.compose
-

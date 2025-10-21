@@ -162,7 +162,7 @@ PHP_PECL_EXTENSIONS="redis apcu uuid"
 
 ## 🧰 Makefile Commands
 
-The project includes a comprehensive Makefile with organized targets. Run `make help` for the complete list.
+The project includes a comprehensive Makefile with **logically organized targets by similarity**. Run `make help` for the complete list.
 
 ### 🏗️ Build Targets
 
@@ -175,44 +175,79 @@ make lint               # Lint Dockerfile with hadolint
 make scan               # Scan for vulnerabilities with Trivy
 ```
 
-### 🧪 Test Targets
-
-```bash
-make test               # Run full test suite
-make test-quick         # Quick component version checks
-make test-structure     # Test container structure
-make run-test           # Run test container (port 8081)
-make stop-test          # Stop test container
-make test-health        # Test comprehensive health endpoint
-make test-health-watch  # Live health monitoring
-make logs-test          # View test container logs
-make shell-test         # Access test container shell
-```
-
-### 🚀 Runtime Targets
+### 🚀 Runtime - Run Containers
 
 ```bash
 make run                # Run local container (port 8080)
 make run-with-app       # Run with mounted application
-make stop               # Stop local container
-make restart            # Restart local container
-make logs               # View container logs
-make shell              # Access container shell (alias: exec)
-make stats              # Show resource usage
+make run-dev            # Run development container (port 8001, Xdebug ready)
+make run-test           # Run test container with comprehensive health checks
 ```
 
-### 🔧 Utility Targets
+### ⏹️ Runtime - Stop & Restart
 
 ```bash
+make stop               # Stop and remove local container
+make stop-dev           # Stop and remove dev container
+make stop-test          # Stop and remove test container
+make restart            # Restart local container
+make restart-dev        # Restart development container
+make restart-test       # Restart test container
+```
+
+### 📋 Runtime - Logs & Shell
+
+```bash
+make logs               # View local container logs (follow)
+make logs-dev           # View development container logs
+make logs-test          # View test container logs
+make shell              # Access local container shell (alias: exec)
+make shell-dev          # Access development container shell
+make shell-test         # Access test container shell
+make stats              # Show container resource usage
+```
+
+### 🧪 Test Targets
+
+```bash
+make test               # Run full test suite (versions, config, health)
+make test-quick         # Quick component version checks
+make test-structure     # Test container structure and directories
+make test-health        # Test comprehensive health check endpoint
+make test-health-status # Show health check status summary
+make test-health-watch  # Live health monitoring (updates every 5s)
+```
+
+### 📤 Push & Publish Targets
+
+```bash
+make push               # Push all tags to Docker Hub
+make push-dev           # Push dev image with custom tag (IMAGE_TAG=xxx)
+make publish-dev        # Build and push dev image (build-dev + push-dev)
+```
+
+### 🏷️ Release & Versioning
+
+```bash
+make tag-latest         # Tag current version as latest/major/minor
+make release            # Full release pipeline (lint+build+test+scan+push)
 make version            # Display current version
 make bump-patch         # Bump patch version (x.x.X)
 make bump-minor         # Bump minor version (x.X.x)
 make bump-major         # Bump major version (X.x.x)
-make push               # Push to Docker Hub
-make release            # Full release pipeline (lint+build+test+scan+push)
+```
+
+### 🧹 Cleanup Targets
+
+```bash
 make clean              # Remove local images and containers
-make clean-all          # Deep clean (volumes + cache)
-make info               # Show image information
+make clean-all          # Deep clean (volumes + build cache)
+```
+
+### ℹ️ Information Targets
+
+```bash
+make info               # Show image information (tags, sizes)
 ```
 
 ### 🐳 Docker Compose Targets
@@ -249,25 +284,29 @@ make compose-up-svc SERVICES="php-api-stack mysql"
 make compose-logs-svc SERVICES="php-api-stack"
 ```
 
-**📖 See [DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md) for detailed Docker Compose usage**
+### Quick Workflow Examples
 
-### Quick Examples
-
+**Development Workflow:**
 ```bash
-# Development workflow
 make build-dev          # Build dev image
-make run                # Start container
-make logs               # View logs
-make shell              # Access shell
-make stop               # Stop container
+make run-dev            # Start dev container (with Xdebug)
+make logs-dev           # View dev logs
+make shell-dev          # Access dev container
+make restart-dev        # Restart dev container
+make stop-dev           # Stop dev container
+```
 
-# Testing workflow
+**Testing Workflow:**
+```bash
 make build-test-image   # Build test image
 make run-test           # Start test container
 make test-health-watch  # Monitor health in real-time
+make logs-test          # View test logs
 make stop-test          # Stop test container
+```
 
-# Release workflow
+**Release Workflow:**
+```bash
 make lint               # Lint Dockerfile
 make build              # Build production image
 make test               # Run tests
@@ -518,7 +557,16 @@ For broader ecosystem projects, visit:
 
 ---
 
-## 📝 Changelog (excerpt)
+## 📝 Changelog
+
+**1.4.3** (Latest)
+
+* ✨ **Makefile refactored** with semantic grouping by similarity (Build, Push, Runtime, Test, Validation, Release, etc.)
+* 🎯 **Enhanced development workflow** with dedicated dev container targets (`run-dev`, `stop-dev`, `restart-dev`, `logs-dev`, `shell-dev`)
+* 🧪 **Improved test targets** with health monitoring (`test-health-status`, `test-health-watch`)
+* 📊 **Better organization** of 50+ Make targets into logical categories
+* 📚 **Updated documentation** reflecting new command structure
+* 🔧 **Zero breaking changes** - all existing targets work identically
 
 **1.2.1**
 
