@@ -54,15 +54,20 @@ ALPINE_VERSION?=3.21
 COMPOSER_VERSION?=2.8.12
 SYMFONY_CLI_VERSION?=5.15.1
 
+DEMO_MODE ?= false
+HEALTH_CHECK_INSTALL ?= false
+
 # Common build args block
 BUILD_ARGS := \
+	--build-arg DEMO_MODE=$(DEMO_MODE) \
+	--build-arg HEALTH_CHECK_INSTALL=$(HEALTH_CHECK_INSTALL) \
+    --build-arg VERSION=$(VERSION) \
     --build-arg PHP_VERSION=$(PHP_VERSION) \
     --build-arg NGINX_VERSION=$(NGINX_VERSION) \
     --build-arg REDIS_VERSION=$(REDIS_VERSION) \
     --build-arg ALPINE_VERSION=$(ALPINE_VERSION) \
     --build-arg COMPOSER_VERSION=$(COMPOSER_VERSION) \
     --build-arg SYMFONY_CLI_VERSION=$(SYMFONY_CLI_VERSION) \
-    --build-arg VERSION=$(VERSION) \
     --build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --build-arg VCS_REF=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
@@ -71,13 +76,10 @@ IMAGE_TAG ?= dev
 XDEBUG_ENABLE ?= 0
 APP_ENV ?= development
 APP_DEBUG ?= true
-DEMO_MODE ?= true
-HEALTH_CHECK_INSTALL ?= true
 
 DEV_BUILD_ARGS := \
 --build-arg APP_ENV=$(APP_ENV) \
 --build-arg APP_DEBUG=$(APP_DEBUG) \
---build-arg DEMO_MODE=$(DEMO_MODE) \
 --build-arg HEALTH_CHECK_INSTALL=$(HEALTH_CHECK_INSTALL) \
 --build-arg ENABLE_XDEBUG=$(XDEBUG_ENABLE)
 
@@ -113,7 +115,7 @@ help: ## Show this help message
 	@echo "  $(CYAN)make push-dev$(NC)         # Push dev image to Docker Hub"
 	@echo "  $(CYAN)make publish-dev$(NC)      # Publish dev image to Docker Hub"
 	@echo "  $(CYAN)make run-dev$(NC)          # Run dev container"
-	@echo "  $(CYAN)make build-test-image$(NC) # Build test image"
+	@echo "  $(CYAN)make build-test$(NC) # Build test image"
 	@echo "  $(CYAN)make test-quick$(NC)       # Quick test of built image"
 	@echo "  $(CYAN)make test$(NC)             # Run comprehensive tests"
 	@echo "  $(CYAN)make run$(NC)              # Run local container on port $(LOCAL_PORT)"
@@ -138,16 +140,6 @@ build: ## Build the Docker image locally (production)
 	fi
 	@echo "$(GREEN)✓ Production build complete!$(NC)"
 
-.PHONY: build-no-cache
-build-no-cache: ## Build without using cache (production)
-	@echo "$(GREEN)Building Docker image (no cache)...$(NC)"
-	@if [ $(HAVE_BUILD_SCRIPT) -eq 1 ]; then \
-		$(BUILD_SCRIPT) --no-cache --version=$(VERSION); \	
-	else \
-		docker build --no-cache $(BUILD_ARGS) -t $(FULL_IMAGE):$(VERSION) . && \
-		docker tag $(FULL_IMAGE):$(VERSION) $(FULL_IMAGE):latest; \
-		fi
-	@echo "$(GREEN)✓ Build complete!$(NC)"
 
 .PHONY: build-dev
 build-dev: ## Build development image (target via BUILD_TARGET, tag via IMAGE_TAG)
@@ -156,10 +148,10 @@ build-dev: ## Build development image (target via BUILD_TARGET, tag via IMAGE_TA
 	-t $(FULL_IMAGE):$(IMAGE_TAG) .
 	@echo "$(GREEN)✓ Dev image built as $(FULL_IMAGE):$(IMAGE_TAG)$(NC)"
 
-.PHONY: build-test-image
-build-test-image: ## Build test image (production base) with comprehensive health check
+.PHONY: build-test
+build-test: ## Build test image (production base) with  health check
 	@echo "$(GREEN)Building test image with comprehensive health check...$(NC)"
-	@docker build $(BUILD_ARGS) --build-arg HEALTH_CHECK_TYPE=comprehensive \
+	@docker build $(BUILD_ARGS) --build-arg HEALTH_CHECK_INSTALL=true \
 		-t $(FULL_IMAGE):test .
 	@echo "$(GREEN)✓ Test image built: $(FULL_IMAGE):test$(NC)"
 
@@ -198,7 +190,6 @@ run: ## Run local container for demo/testing
 	@docker run -d \
 		--name $(LOCAL_CONTAINER) \
 		-p $(LOCAL_PORT):80 \
-		-e DEMO_MODE=true \
 		--env-file .env \
 		-v $(PWD)/logs:/var/log \
 		$(FULL_IMAGE):latest
@@ -216,31 +207,6 @@ run: ## Run local container for demo/testing
 	@echo "  $(CYAN)make stop$(NC)            # Stop container"
 	@echo "  $(CYAN)make logs$(NC)            # View logs"
 	@echo "  $(CYAN)make shell$(NC)           # Access shell"
-	@echo "  $(CYAN)make run-with-app$(NC)  # Run with app mounted"
-
-.PHONY: run-with-app
-run-with-app: ## Run local container with mounted application
-	@echo "$(GREEN)Starting local container with application mount...$(NC)"
-	@docker stop $(LOCAL_CONTAINER) >/dev/null 2>&1 || true
-	@docker rm $(LOCAL_CONTAINER) >/dev/null 2>&1 || true
-	@if [ ! -d "$(PWD)/app" ]; then \
-		echo "$(YELLOW)Creating app directory...$(NC)"; \
-		mkdir -p $(PWD)/app/public; \
-	fi
-	@docker run -d \
-		--name $(LOCAL_CONTAINER) \
-		-p $(LOCAL_PORT):80 \
-		-e DEMO_MODE=true \
-		--env-file .env \
-		-v $(PWD)/app:/var/www/html \
-		-v $(PWD)/logs:/var/log \
-		$(FULL_IMAGE):latest
-	@echo "$(GREEN)✓ Container running at http://localhost:$(LOCAL_PORT)$(NC)"
-	@echo "$(CYAN)Application mounted from:$(NC) $(PWD)/app"
-	@echo "\n$(BLUE)Next steps:$(NC)"
-	@echo "  1. Create your $(CYAN)app/public/index.php$(NC)"
-	@echo "  2. Run $(CYAN)docker exec $(LOCAL_CONTAINER) nginx -s reload$(NC)"
-	@echo "  3. Visit http://localhost:$(LOCAL_PORT)"
 
 .PHONY: run-dev
 run-dev: ## Run dev container (port 8001, or override: make run-dev DEV_PORT=9000)
@@ -262,7 +228,7 @@ run-dev: ## Run dev container (port 8001, or override: make run-dev DEV_PORT=900
 
 
 .PHONY: run-test
-run-test: build-test-image ## Run test container (comprehensive health)
+run-test: build-test ## Run test container (comprehensive health)
 	@echo "$(GREEN)Starting test container...$(NC)"
 	@docker stop $(TEST_CONTAINER) >/dev/null 2>&1 || true
 	@docker rm $(TEST_CONTAINER) >/dev/null 2>&1 || true

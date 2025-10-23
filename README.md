@@ -179,7 +179,6 @@ make scan               # Scan for vulnerabilities with Trivy
 
 ```bash
 make run                # Run local container (port 8080)
-make run-with-app       # Run with mounted application
 make run-dev            # Run development container (port 8001, Xdebug ready)
 make run-test           # Run test container with comprehensive health checks
 ```

@@ -1,9 +1,5 @@
-# Multi-stage build for kariricode/php-api-stack — FINAL (lint‑clean, syntax‑fixed)
+# Multi-stage build for kariricode/php-api-stack
 # Production-ready PHP + Nginx + Redis (+ optional Dev tooling)
-# Notes:
-#  - Avoid inline comments after a trailing backslash (\). They break line continuation.
-#  - Hadolint DL3018 is selectively ignored where pinning is impractical; see comments.
-
 # ------------------------------------------------------------
 # Versions (overridable via build args)
 # ------------------------------------------------------------
@@ -87,9 +83,13 @@ RUN set -eux; \
     # network / TLS
     apk add --no-cache git curl wget ca-certificates openssl; \
     # misc runtime libs
-    apk add --no-cache gettext tzdata pcre2 zlib unzip; \
+    apk add --no-cache gettext tzdata pcre2 zlib p7zip; \
     # image/zip/xml/icu
     apk add --no-cache icu-libs libzip libpng libjpeg-turbo freetype libxml2; \
+    \
+    # Remove tar if it exists to mitigate CVE-2025-45582
+    apk del tar || true; \
+    \
     update-ca-certificates \
     \
     git config --global --add safe.directory /var/www/html
@@ -218,20 +218,25 @@ COPY scripts/quick-start.sh        /usr/local/bin/quick-start
 RUN chmod +x /usr/local/bin/docker-entrypoint /usr/local/bin/process-configs /usr/local/bin/quick-start
 
 # ------------------------------------------------------------
-# Healthcheck templates (simple/comprehensive)
+# Healthcheck templates
 # ------------------------------------------------------------
-COPY --chown=nginx:nginx index.php /usr/local/share/php-api-stack/index.php
-COPY --chown=nginx:nginx health.php /usr/local/share/php-api-stack/health-comprehensive.php
+# Build-time flags (staging only; actual publish happens at runtime)
+ARG DEMO_MODE=false
+ARG HEALTH_CHECK_INSTALL=false
 
+# Secure staging directory (read-only area inside image)
 RUN set -eux; \
-    install -d -m 0755 /usr/local/share/php-api-stack; \
-    if [ "$HEALTH_CHECK_TYPE" = "comprehensive" ]; then \
-    cp /usr/local/share/php-api-stack/health-comprehensive.php /usr/local/share/php-api-stack/health.php; \
-    else \
-    printf "<?php\\nheader('Content-Type: application/json');\\necho json_encode(['status'=>'healthy','timestamp'=>date('c')]);\\n" > /usr/local/share/php-api-stack/health.php; \
-    fi; \
-    php -l /usr/local/share/php-api-stack/health.php; \
-    php -l /usr/local/share/php-api-stack/index.php
+    install -d -m 0755 /opt/php-api-stack-templates
+
+# Always stage templates into /opt (safe, outside working dirs). They will
+# ONLY be published to /var/www/html/public at runtime when env=true.
+COPY --chown=nginx:nginx php/index.php /opt/php-api-stack-templates/index.php
+COPY --chown=nginx:nginx php/health.php /opt/php-api-stack-templates/health.php
+
+
+# Optional: validate syntax at build (does not publish)
+RUN php -l /opt/php-api-stack-templates/index.php; \
+    php -l /opt/php-api-stack-templates/health.php
 
 # Materialize configs at build time (useful for some CIs)
 RUN /usr/local/bin/process-configs
@@ -258,16 +263,21 @@ FROM base AS dev
 
 ARG SYMFONY_CLI_VERSION
 ARG ENABLE_XDEBUG=0
+ARG APP_ENV=production
 
 # hadolint ignore=DL3018
 RUN set -eux; \
     apk add --no-cache procps htop; \
+    if [ "$APP_ENV" = "development" ]; then \
     wget -q -O /tmp/symfony-installer https://get.symfony.com/cli/installer; \
     bash /tmp/symfony-installer; \
     mv /root/.symfony*/bin/symfony /usr/local/bin/symfony; \
     chmod +x /usr/local/bin/symfony; \
     rm -rf /root/.symfony* /tmp/symfony-installer; \
-    symfony version || true
+    symfony version || true; \
+    else \
+    echo "Skipping Symfony CLI install (APP_ENV=$APP_ENV)"; \
+    fi
 
 # Optional Xdebug installation for local debugging
 # hadolint ignore=DL3018

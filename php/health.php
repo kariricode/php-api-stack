@@ -348,10 +348,12 @@ final class RedisCheck extends AbstractHealthCheck
 
         $host = getenv('REDIS_HOST') ?: '127.0.0.1';
         $password = getenv('REDIS_PASSWORD') ?: null;
+        $port = getenv('REDIS_PORT') ?: 6379;
+
 
         try {
             $connectStart = microtime(true);
-            $connected = @$redis->connect('127.0.0.1', 6379, self::TIMEOUT);
+            $connected = @$redis->connect('127.0.0.1', $port, self::TIMEOUT);
             $connectDuration = (microtime(true) - $connectStart) * 1000;
 
             if (!$connected) {
