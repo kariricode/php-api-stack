@@ -159,6 +159,31 @@ final class RedisCheck extends AbstractComponentCheck
         return 'Redis';
     }
 
+
+    /**
+     * Smart Redis Host Resolution
+     * 
+     * Tenta resolver o hostname. Se falhar, usa 127.0.0.1 (standalone mode).
+     */
+    protected function getRedisHost(): string
+    {
+        $host = getenv('REDIS_HOST') ?: '127.0.0.1';
+
+        // Se for "redis" (docker-compose), verifica se resolve
+        if ($host === 'redis') {
+            // Suprime warning de DNS
+            $resolved = @gethostbyname($host);
+
+            // Se não resolveu (retorna o próprio hostname), usa localhost
+            if ($resolved === $host) {
+                return '127.0.0.1';
+            }
+        }
+
+        return $host;
+    }
+
+
     protected function performCheck(): StatusResult
     {
         if (!extension_loaded('redis')) {
@@ -171,12 +196,12 @@ final class RedisCheck extends AbstractComponentCheck
 
         $redis = new \Redis();
 
-        $host = getenv('REDIS_HOST') ?: '127.0.0.1';
+        $host = $this->getRedisHost();
         $password = getenv('REDIS_PASSWORD') ?: null;
-        $port = getenv('REDIS_PORT') ?: 6379;
+        $port = 6379;
 
         try {
-            $connected = @$redis->connect('127.0.0.1', $port, 1.0);
+            $connected = @$redis->connect($host, $port, 1.0);
 
             if (!$connected) {
                 return new StatusResult(
