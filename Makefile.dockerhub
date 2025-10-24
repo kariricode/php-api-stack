@@ -1,0 +1,397 @@
+# Makefile.dockerhub - Docker Hub Publication Commands
+# Include in main Makefile with: -include Makefile.dockerhub
+
+# =============================================================
+# DOCKER HUB AUTHENTICATION
+# =============================================================
+.PHONY: docker-login
+docker-login: ## Login to Docker Hub
+	@echo "$(GREEN)Logging in to Docker Hub...$(NC)"
+	@if docker info 2>/dev/null | grep -q "Username"; then \
+		echo "$(CYAN)Already logged in$(NC)"; \
+	else \
+		docker login -u $(DOCKER_HUB_USER); \
+	fi
+
+.PHONY: docker-logout
+docker-logout: ## Logout from Docker Hub
+	@echo "$(YELLOW)Logging out from Docker Hub...$(NC)"
+	@docker logout
+	@echo "$(GREEN)OK: Logged out$(NC)"
+
+# =============================================================
+# VERSION MANAGEMENT
+# =============================================================
+.PHONY: version
+version: ## Display current version
+	@echo "$(CYAN)Current version:$(NC) $(VERSION)"
+	@echo "$(CYAN)Docker image:$(NC)   $(FULL_IMAGE):$(VERSION)"
+	@echo "$(CYAN)Major:$(NC)          $(MAJOR_VERSION)"
+	@echo "$(CYAN)Minor:$(NC)          $(MINOR_VERSION)"
+
+.PHONY: bump-patch
+bump-patch: ## Bump patch version (x.x.X)
+	@NEW_VERSION=$$(echo $(VERSION) | awk -F. '{print $$1"."$$2"."$$3+1}'); \
+	echo $$NEW_VERSION > VERSION; \
+	echo "$(GREEN)OK: Version bumped to $$NEW_VERSION$(NC)"; \
+	git add VERSION 2>/dev/null || true; \
+	git commit -m "chore: bump version to $$NEW_VERSION" 2>/dev/null || true
+
+.PHONY: bump-minor
+bump-minor: ## Bump minor version (x.X.0)
+	@NEW_VERSION=$$(echo $(VERSION) | awk -F. '{print $$1"."$$2+1".0"}'); \
+	echo $$NEW_VERSION > VERSION; \
+	echo "$(GREEN)OK: Version bumped to $$NEW_VERSION$(NC)"; \
+	git add VERSION 2>/dev/null || true; \
+	git commit -m "chore: bump version to $$NEW_VERSION" 2>/dev/null || true
+
+.PHONY: bump-major
+bump-major: ## Bump major version (X.0.0)
+	@NEW_VERSION=$$(echo $(VERSION) | awk -F. '{print $$1+1".0.0"}'); \
+	echo $$NEW_VERSION > VERSION; \
+	echo "$(GREEN)OK: Version bumped to $$NEW_VERSION$(NC)"; \
+	git add VERSION 2>/dev/null || true; \
+	git commit -m "chore: bump version to $$NEW_VERSION" 2>/dev/null || true
+
+# =============================================================
+# TAGGING
+# =============================================================
+.PHONY: tag-production
+tag-production: ## Tag production image with version tags
+	@echo "$(GREEN)Tagging production image...$(NC)"
+	@docker tag $(FULL_IMAGE):latest $(FULL_IMAGE):$(VERSION)
+	@docker tag $(FULL_IMAGE):latest $(FULL_IMAGE):$(MAJOR_VERSION)
+	@docker tag $(FULL_IMAGE):latest $(FULL_IMAGE):$(MINOR_VERSION)
+	@echo "$(GREEN)OK: Tags created:$(NC)"
+	@echo "  • $(VERSION)"
+	@echo "  • $(MAJOR_VERSION)"
+	@echo "  • $(MINOR_VERSION)"
+	@echo "  • latest"
+
+.PHONY: tag-dev
+tag-dev: ## Tag dev image
+	@echo "$(GREEN)Tagging dev image...$(NC)"
+	@echo "$(GREEN)OK: Tag created:$(NC)"
+	@echo "  • dev"
+
+.PHONY: tag-all
+tag-all: tag-production tag-dev ## Tag all images
+
+# =============================================================
+# PUSH TO DOCKER HUB
+# =============================================================
+.PHONY: push-production
+push-production: docker-login ## Push production image to Docker Hub
+	@echo "$(GREEN)Pushing production images to Docker Hub...$(NC)"
+	@echo ""
+	@echo "$(CYAN)Pushing $(FULL_IMAGE):$(VERSION)...$(NC)"
+	@docker push $(FULL_IMAGE):$(VERSION)
+	@echo "$(CYAN)Pushing $(FULL_IMAGE):latest...$(NC)"
+	@docker push $(FULL_IMAGE):latest
+	@echo "$(CYAN)Pushing $(FULL_IMAGE):$(MAJOR_VERSION)...$(NC)"
+	@docker push $(FULL_IMAGE):$(MAJOR_VERSION)
+	@echo "$(CYAN)Pushing $(FULL_IMAGE):$(MINOR_VERSION)...$(NC)"
+	@docker push $(FULL_IMAGE):$(MINOR_VERSION)
+	@echo ""
+	@echo "$(GREEN)OK: Production images pushed successfully!$(NC)"
+	@echo "$(CYAN)Available at: https://hub.docker.com/r/$(FULL_IMAGE)$(NC)"
+
+.PHONY: push-dev
+push-dev: docker-login ## Push dev image to Docker Hub
+	@echo "$(GREEN)Pushing dev image to Docker Hub...$(NC)"
+	@echo ""
+	@echo "$(CYAN)Pushing $(FULL_IMAGE):dev...$(NC)"
+	@docker push $(FULL_IMAGE):dev
+	@echo ""
+	@echo "$(GREEN)OK: Dev image pushed successfully!$(NC)"
+
+.PHONY: push-base
+push-base: docker-login ## Push base image to Docker Hub
+	@echo "$(GREEN)Pushing base image to Docker Hub...$(NC)"
+	@docker push $(FULL_IMAGE):base
+	@echo "$(GREEN)OK: Base image pushed!$(NC)"
+
+.PHONY: push
+push: push-production ## Alias for push-production
+
+.PHONY: push-all
+push-all: push-production push-dev ## Push all images (production + dev)
+	@echo ""
+	@echo "$(GREEN)==========================================$(NC)"
+	@echo "$(GREEN)OK: All images pushed successfully!$(NC)"
+	@echo "$(GREEN)==========================================$(NC)"
+
+# =============================================================
+# VALIDATION & SECURITY
+# =============================================================
+.PHONY: lint
+lint: ## Lint Dockerfile with hadolint
+	@echo "$(GREEN)Linting Dockerfile...$(NC)"
+	@if command -v hadolint >/dev/null 2>&1; then \
+		hadolint Dockerfile || true; \
+	else \
+		docker run --rm -i hadolint/hadolint < Dockerfile || true; \
+	fi
+	@echo "$(GREEN)OK: Lint complete$(NC)"
+
+.PHONY: scan
+scan: ## Scan image for vulnerabilities (Trivy)
+	@echo "$(GREEN)Scanning for vulnerabilities...$(NC)"
+	@if command -v trivy >/dev/null 2>&1; then \
+		trivy image --severity HIGH,CRITICAL $(FULL_IMAGE):latest; \
+	else \
+		docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+			aquasec/trivy:latest image --severity HIGH,CRITICAL $(FULL_IMAGE):latest; \
+	fi
+
+.PHONY: scan-dev
+scan-dev: ## Scan dev image for vulnerabilities
+	@echo "$(GREEN)Scanning dev image...$(NC)"
+	@if command -v trivy >/dev/null 2>&1; then \
+		trivy image --severity HIGH,CRITICAL $(FULL_IMAGE):dev; \
+	else \
+		docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+			aquasec/trivy:latest image --severity HIGH,CRITICAL $(FULL_IMAGE):dev; \
+	fi
+
+.PHONY: validate-images
+validate-images: ## Validate all images exist locally
+	@echo "$(GREEN)Validating images...$(NC)"
+	@MISSING=0; \
+	for tag in latest $(VERSION) $(MAJOR_VERSION) $(MINOR_VERSION) dev; do \
+		if docker image inspect $(FULL_IMAGE):$$tag >/dev/null 2>&1; then \
+			echo "$(GREEN)✓ $(FULL_IMAGE):$$tag$(NC)"; \
+		else \
+			echo "$(RED)✗ $(FULL_IMAGE):$$tag (missing)$(NC)"; \
+			MISSING=$$((MISSING + 1)); \
+		fi; \
+	done; \
+	if [ $$MISSING -gt 0 ]; then \
+		echo ""; \
+		echo "$(YELLOW)WARNING: $$MISSING image(s) missing. Run 'make build-all' first.$(NC)"; \
+		exit 1; \
+	fi; \
+	echo "$(GREEN)OK: All images validated$(NC)"
+
+# =============================================================
+# PUBLISH (BUILD + PUSH)
+# =============================================================
+.PHONY: publish-production
+publish-production: build tag-production push-production ## Build, tag and push production
+	@echo "$(GREEN)OK: Production published: $(VERSION)$(NC)"
+
+.PHONY: publish-dev
+publish-dev: build-dev tag-dev push-dev ## Build, tag and push dev
+	@echo "$(GREEN)OK: Dev published: dev$(NC)"
+
+.PHONY: publish-all
+publish-all: build-all tag-all push-all ## Build, tag and push all images
+	@echo "$(GREEN)OK: All images published$(NC)"
+
+# =============================================================
+# RELEASE PIPELINE
+# =============================================================
+.PHONY: pre-release-check
+pre-release-check: ## Pre-release validation checks
+	@echo "$(GREEN)Running pre-release checks...$(NC)"
+	@echo ""
+	@echo "$(CYAN)[1/5] Checking Git status...$(NC)"
+	@if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then \
+		echo "$(RED)✗ Uncommitted changes detected$(NC)"; \
+		git status --short; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✓ Git working directory clean$(NC)"
+	@echo ""
+	@echo "$(CYAN)[2/5] Checking Docker daemon...$(NC)"
+	@docker info >/dev/null 2>&1 || (echo "$(RED)✗ Docker daemon not running$(NC)" && exit 1)
+	@echo "$(GREEN)✓ Docker daemon running$(NC)"
+	@echo ""
+	@echo "$(CYAN)[3/5] Checking Docker Hub authentication...$(NC)"
+	@if ! docker info 2>/dev/null | grep -q "Username"; then \
+		echo "$(YELLOW)⚠ Not logged in to Docker Hub$(NC)"; \
+		$(MAKE) docker-login; \
+	else \
+		echo "$(GREEN)✓ Logged in to Docker Hub$(NC)"; \
+	fi
+	@echo ""
+	@echo "$(CYAN)[4/5] Checking VERSION file...$(NC)"
+	@if [ ! -f VERSION ]; then \
+		echo "$(RED)✗ VERSION file not found$(NC)"; \
+		exit 1; \
+	fi
+	@echo "$(GREEN)✓ VERSION file exists: $(VERSION)$(NC)"
+	@echo ""
+	@echo "$(CYAN)[5/5] Linting Dockerfile...$(NC)"
+	@$(MAKE) lint --no-print-directory
+	@echo ""
+	@echo "$(GREEN)✓ All pre-release checks passed!$(NC)"
+
+.PHONY: release-production
+release-production: pre-release-check build test scan tag-production push-production ## Full production release pipeline
+	@echo ""
+	@echo "$(GREEN)╔═══════════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║     OK: Production Release Complete!             ║$(NC)"
+	@echo "$(GREEN)╚═══════════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(CYAN)Version:$(NC)      $(VERSION)"
+	@echo "$(CYAN)Image:$(NC)        $(FULL_IMAGE):$(VERSION)"
+	@echo "$(CYAN)Docker Hub:$(NC)   https://hub.docker.com/r/$(FULL_IMAGE)"
+	@echo ""
+	@echo "$(YELLOW)Available tags:$(NC)"
+	@echo "  • $(FULL_IMAGE):$(VERSION)"
+	@echo "  • $(FULL_IMAGE):$(MAJOR_VERSION)"
+	@echo "  • $(FULL_IMAGE):$(MINOR_VERSION)"
+	@echo "  • $(FULL_IMAGE):latest"
+	@echo ""
+	@echo "$(CYAN)Pull command:$(NC)"
+	@echo "  docker pull $(FULL_IMAGE):latest"
+	@echo ""
+
+.PHONY: release-dev
+release-dev: build-dev tag-dev push-dev ## Release dev image
+	@echo ""
+	@echo "$(GREEN)OK: Dev Release Complete: dev$(NC)"
+
+.PHONY: release-all
+release-all: pre-release-check build-all test scan tag-all push-all ## Full release (production + dev)
+	@echo ""
+	@echo "$(GREEN)╔═══════════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║     OK: Full Release Complete!                   ║$(NC)"
+	@echo "$(GREEN)╚═══════════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(CYAN)Version:$(NC) $(VERSION)"
+	@echo ""
+	@echo "$(YELLOW)Production tags:$(NC)"
+	@echo "  • $(FULL_IMAGE):$(VERSION)"
+	@echo "  • $(FULL_IMAGE):latest"
+	@echo ""
+	@echo "$(YELLOW)Development tag:$(NC)"
+	@echo "  • $(FULL_IMAGE):dev"
+
+.PHONY: release
+release: release-production ## Alias for release-production
+
+# =============================================================
+# DOCKER HUB UTILITIES
+# =============================================================
+.PHONY: hub-check
+hub-check: ## Check if image exists on Docker Hub
+	@echo "$(GREEN)Checking Docker Hub...$(NC)"
+	@printf "$(CYAN)Checking $(FULL_IMAGE):latest...$(NC) "; \
+	if docker manifest inspect $(FULL_IMAGE):latest >/dev/null 2>&1; then \
+		echo "$(GREEN)✓ exists$(NC)"; \
+	else \
+		echo "$(YELLOW)✗ not found$(NC)"; \
+	fi
+	@printf "$(CYAN)Checking $(FULL_IMAGE):$(VERSION)...$(NC) "; \
+	if docker manifest inspect $(FULL_IMAGE):$(VERSION) >/dev/null 2>&1; then \
+		echo "$(GREEN)✓ exists$(NC)"; \
+	else \
+		echo "$(YELLOW)✗ not found$(NC)"; \
+	fi
+	@printf "$(CYAN)Checking $(FULL_IMAGE):dev...$(NC) "; \
+	if docker manifest inspect $(FULL_IMAGE):dev >/dev/null 2>&1; then \
+		echo "$(GREEN)✓ exists$(NC)"; \
+	else \
+		echo "$(YELLOW)✗ not found$(NC)"; \
+	fi
+
+.PHONY: hub-tags
+hub-tags: ## List all tags on Docker Hub
+	@echo "$(GREEN)Fetching tags from Docker Hub...$(NC)"
+	@curl -s https://registry.hub.docker.com/v2/repositories/$(FULL_IMAGE)/tags/ | \
+		jq -r '.results[].name' | sort -V || \
+		echo "$(YELLOW)Install jq for better output: apt install jq$(NC)"
+
+.PHONY: hub-info
+hub-info: ## Show Docker Hub repository info
+	@echo "$(CYAN)╔═══════════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║     Docker Hub Repository Information            ║$(NC)"
+	@echo "$(CYAN)╚═══════════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(CYAN)Repository:$(NC)    $(FULL_IMAGE)"
+	@echo "$(CYAN)URL:$(NC)           https://hub.docker.com/r/$(FULL_IMAGE)"
+	@echo "$(CYAN)Current Ver:$(NC)   $(VERSION)"
+	@echo ""
+	@echo "$(YELLOW)Expected Production Tags:$(NC)"
+	@echo "  • latest"
+	@echo "  • $(VERSION)"
+	@echo "  • $(MAJOR_VERSION)"
+	@echo "  • $(MINOR_VERSION)"
+	@echo ""
+	@echo "$(YELLOW)Expected Dev Tag:$(NC)"
+	@echo "  • dev"
+	@echo ""
+	@$(MAKE) hub-check --no-print-directory
+
+.PHONY: hub-clean
+hub-clean: ## Remove old local tags (keeps latest, current version, dev)
+	@echo "$(YELLOW)Cleaning old local tags...$(NC)"
+	@echo "$(CYAN)Keeping: latest, $(VERSION), dev$(NC)"
+	@docker images $(FULL_IMAGE) --format "{{.Tag}}" | \
+		grep -v -E "^(latest|$(VERSION)|dev|$(MAJOR_VERSION)|$(MINOR_VERSION))$$" | \
+		xargs -I {} sh -c 'echo "Removing $(FULL_IMAGE):{}" && docker rmi $(FULL_IMAGE):{} 2>/dev/null' || true
+	@echo "$(GREEN)OK: Cleanup complete$(NC)"
+
+# =============================================================
+# HELP FOR DOCKER HUB COMMANDS
+# =============================================================
+.PHONY: hub-help
+hub-help: ## Show Docker Hub specific help
+	@echo "$(GREEN)╔═══════════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║     Docker Hub Commands - Quick Reference        ║$(NC)"
+	@echo "$(GREEN)╚═══════════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(MAGENTA)=== AUTHENTICATION ===$(NC)"
+	@echo "  $(YELLOW)make docker-login$(NC)         Login to Docker Hub"
+	@echo "  $(YELLOW)make docker-logout$(NC)        Logout from Docker Hub"
+	@echo ""
+	@echo "$(MAGENTA)=== VERSION MANAGEMENT ===$(NC)"
+	@echo "  $(YELLOW)make version$(NC)              Show current version"
+	@echo "  $(YELLOW)make bump-patch$(NC)           Bump patch version (x.x.X)"
+	@echo "  $(YELLOW)make bump-minor$(NC)           Bump minor version (x.X.0)"
+	@echo "  $(YELLOW)make bump-major$(NC)           Bump major version (X.0.0)"
+	@echo ""
+	@echo "$(MAGENTA)=== TAGGING ===$(NC)"
+	@echo "  $(YELLOW)make tag-production$(NC)       Tag production image"
+	@echo "  $(YELLOW)make tag-dev$(NC)              Tag dev image"
+	@echo "  $(YELLOW)make tag-all$(NC)              Tag all images"
+	@echo ""
+	@echo "$(MAGENTA)=== PUSH TO HUB ===$(NC)"
+	@echo "  $(YELLOW)make push-production$(NC)      Push production images"
+	@echo "  $(YELLOW)make push-dev$(NC)             Push dev image"
+	@echo "  $(YELLOW)make push-all$(NC)             Push all images"
+	@echo ""
+	@echo "$(MAGENTA)=== COMPLETE WORKFLOWS ===$(NC)"
+	@echo "  $(YELLOW)make publish-production$(NC)   Build + Tag + Push production"
+	@echo "  $(YELLOW)make publish-dev$(NC)          Build + Tag + Push dev"
+	@echo "  $(YELLOW)make publish-all$(NC)          Build + Tag + Push all"
+	@echo ""
+	@echo "$(MAGENTA)=== RELEASE PIPELINE ===$(NC)"
+	@echo "  $(YELLOW)make release-production$(NC)   Full production release"
+	@echo "  $(YELLOW)make release-dev$(NC)          Release dev image"
+	@echo "  $(YELLOW)make release-all$(NC)          Full release (prod + dev)"
+	@echo "  $(YELLOW)make release$(NC)              Alias for release-production"
+	@echo ""
+	@echo "$(MAGENTA)=== VALIDATION ===$(NC)"
+	@echo "  $(YELLOW)make lint$(NC)                 Lint Dockerfile"
+	@echo "  $(YELLOW)make scan$(NC)                 Scan for vulnerabilities"
+	@echo "  $(YELLOW)make validate-images$(NC)      Check local images exist"
+	@echo "  $(YELLOW)make pre-release-check$(NC)    Pre-release validation"
+	@echo ""
+	@echo "$(MAGENTA)=== HUB UTILITIES ===$(NC)"
+	@echo "  $(YELLOW)make hub-check$(NC)            Check if images exist on Hub"
+	@echo "  $(YELLOW)make hub-tags$(NC)             List all Hub tags"
+	@echo "  $(YELLOW)make hub-info$(NC)             Show repository info"
+	@echo "  $(YELLOW)make hub-clean$(NC)            Remove old local tags"
+	@echo ""
+	@echo "$(BLUE)Examples:$(NC)"
+	@echo "  $(CYAN)# Quick release$(NC)"
+	@echo "  make release-production"
+	@echo ""
+	@echo "  $(CYAN)# Version bump + release$(NC)"
+	@echo "  make bump-patch && make release-production"
+	@echo ""
+	@echo "  $(CYAN)# Build and publish dev$(NC)"
+	@echo "  make publish-dev"

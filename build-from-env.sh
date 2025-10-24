@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build script for kariricode/php-api-stack
-# This script reads all configurations from .env file and builds the Docker image
-# Usage: ./build-from-env.sh [--push] [--no-cache]
+# Architecture: Base → Production | Dev
+# Usage: ./build-from-env.sh [OPTIONS]
 
 set -euo pipefail
 
@@ -19,12 +19,14 @@ CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
-# Parse command line arguments
+# Default values
 PUSH_TO_HUB=false
 NO_CACHE=false
 MULTI_PLATFORM=false
-TEST_BUILD=false
+BUILD_TARGET="production"  # default: production
+VERSION_ARG=""
 
+# Parse command line arguments
 for arg in "$@"; do
     case $arg in
         --push)
@@ -39,8 +41,8 @@ for arg in "$@"; do
             MULTI_PLATFORM=true
             shift
             ;;
-        --test) 
-            TEST_BUILD=true
+        --target=*)
+            BUILD_TARGET="${arg#*=}"
             shift
             ;;
         --version=*)
@@ -50,13 +52,21 @@ for arg in "$@"; do
         --help)
             echo "Usage: $0 [OPTIONS]"
             echo ""
+            echo "Build Architecture: Base → Production | Dev"
+            echo ""
             echo "Options:"
-            echo "  --push           Push image to Docker Hub after build"
-            echo "  --no-cache       Build without using cache"
-            echo "  --multi-platform Build for multiple platforms (amd64, arm64)"
-            echo "  --test           Build with comprehensive health check"  # <-- ADICIONAR
-            echo "  --version=X.Y.Z  Override version instead of using VERSION file"
-            echo "  --help           Show this help message"
+            echo "  --target=TARGET      Build target stage: base, production, dev (default: production)"
+            echo "  --push               Push image to Docker Hub after build"
+            echo "  --no-cache           Build without using cache"
+            echo "  --multi-platform     Build for multiple platforms (amd64, arm64)"
+            echo "  --version=X.Y.Z      Override version instead of using VERSION file"
+            echo "  --help               Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  $0                           # Build production image"
+            echo "  $0 --target=dev              # Build dev image with Xdebug"
+            echo "  $0 --target=base             # Build base layer only"
+            echo "  $0 --target=production --push  # Build and push production"
             exit 0
             ;;
         *)
@@ -67,7 +77,16 @@ for arg in "$@"; do
     esac
 done
 
-
+# Validate build target
+case $BUILD_TARGET in
+    base|production|dev)
+        ;;
+    *)
+        echo -e "${RED}Invalid build target: $BUILD_TARGET${NC}"
+        echo "Valid targets: base, production, dev"
+        exit 1
+        ;;
+esac
 
 # Functions
 log_info() {
@@ -108,7 +127,14 @@ fi
 # Load .env file
 log_step "Loading configuration from .env..."
 set -a
-source .env
+while IFS='=' read -r key value; do
+    # Skip comments and empty lines
+    [[ $key =~ ^#.*$ ]] || [[ -z $key ]] && continue
+    # Remove leading/trailing whitespace from value
+    value=$(echo "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    # Export the variable
+    export "$key=$value"
+done < .env
 set +a
 
 # Set default values if not defined in .env
@@ -130,12 +156,13 @@ VCS_REF=$(git rev-parse --short HEAD 2>/dev/null || echo "no-git")
 
 # Display build configuration
 echo ""
-echo -e "${MAGENTA}╔══════════════════════════════════════════════════════╗${NC}"
-echo -e "${MAGENTA}║     PHP API Stack - Docker Build Configuration      ║${NC}"
-echo -e "${MAGENTA}╚══════════════════════════════════════════════════════╝${NC}"
+echo -e "${MAGENTA}╔═══════════════════════════════════════════════════╗${NC}"
+echo -e "${MAGENTA}║     PHP API Stack - Docker Build Configuration   ║${NC}"
+echo -e "${MAGENTA}╚═══════════════════════════════════════════════════╝${NC}"
 echo ""
+echo -e "${WHITE}Architecture:${NC}  Base → Production | Dev"
+echo -e "${WHITE}Build Target:${NC}  ${CYAN}${BUILD_TARGET}${NC}"
 echo -e "${WHITE}Image:${NC}         ${FULL_IMAGE}:${VERSION}"
-echo -e "${WHITE}Environment:${NC}   ${APP_ENV}"
 echo ""
 echo -e "${YELLOW}Stack Versions:${NC}"
 echo "  • PHP:         ${PHP_VERSION}"
@@ -143,17 +170,24 @@ echo "  • Nginx:       ${NGINX_VERSION}"
 echo "  • Redis:       ${REDIS_VERSION}"
 echo "  • Alpine:      ${ALPINE_VERSION}"
 echo "  • Composer:    ${COMPOSER_VERSION}"
-echo "  • Symfony CLI: ${SYMFONY_CLI_VERSION}"
+
+if [ "$BUILD_TARGET" = "dev" ]; then
+    echo "  • Symfony CLI: ${SYMFONY_CLI_VERSION}"
+    echo "  • Xdebug:      ${XDEBUG_VERSION}"
+fi
+
 echo ""
 echo -e "${YELLOW}PHP Extensions:${NC}"
 echo "  • Core: ${PHP_CORE_EXTENSIONS}"
 echo "  • PECL: ${PHP_PECL_EXTENSIONS}"
 echo ""
-echo -e "${YELLOW}Build Options:${NC}"
-echo "  • No Cache:       ${NO_CACHE}"
-echo "  • Push to Hub:    ${PUSH_TO_HUB}"
-echo "  • Multi-Platform: ${MULTI_PLATFORM}"
-echo ""
+echo -e "${YELLOW}PECL Versions:${NC}"
+echo "  • Redis:   ${PHP_REDIS_VERSION}"
+echo "  • APCu:    ${PHP_APCU_VERSION}"
+echo "  • UUID:    ${PHP_UUID_VERSION}"
+echo "  • ImageMagick: ${PHP_IMAGICK_VERSION}"
+echo "  • AMQP:    ${PHP_AMQP_VERSION}"
+echo "" 
 
 # Confirm build
 read -p "$(echo -e ${GREEN}Proceed with build? [Y/n]: ${NC})" -n 1 -r
@@ -164,7 +198,7 @@ if [[ $REPLY =~ ^[Nn]$ ]]; then
 fi
 
 # Prepare build command
-log_step "Preparing build command..."
+log_step "Preparing build command for target: ${BUILD_TARGET}..."
 
 # Base build command
 BUILD_CMD="docker"
@@ -173,7 +207,6 @@ BUILD_CMD="docker"
 if [ "$MULTI_PLATFORM" = true ]; then
     log_info "Setting up Docker buildx for multi-platform build..."
     
-    # Create builder if it doesn't exist
     if ! docker buildx ls | grep -q "php-api-stack-builder"; then
         docker buildx create --name php-api-stack-builder --use
         docker buildx inspect --bootstrap
@@ -195,8 +228,7 @@ if [ "$MULTI_PLATFORM" = true ]; then
     BUILD_CMD="$BUILD_CMD $PLATFORM_ARG"
 fi
 
-# Add no-cache if requested
-# Add no-cache if requested or guard cache-from
+# Add no-cache or cache-from
 if [ "$NO_CACHE" = true ]; then
     BUILD_CMD="$BUILD_CMD --no-cache"
 else
@@ -207,72 +239,61 @@ else
     fi
 fi
 
-
-# Add build arguments
+# Common build arguments
 BUILD_CMD="$BUILD_CMD \
     --build-arg PHP_VERSION=${PHP_VERSION} \
     --build-arg NGINX_VERSION=${NGINX_VERSION} \
     --build-arg REDIS_VERSION=${REDIS_VERSION} \
     --build-arg ALPINE_VERSION=${ALPINE_VERSION} \
     --build-arg COMPOSER_VERSION=${COMPOSER_VERSION} \
-    --build-arg SYMFONY_CLI_VERSION=${SYMFONY_CLI_VERSION} \
-    --build-arg PHP_CORE_EXTENSIONS=\"${PHP_CORE_EXTENSIONS}\" \
-    --build-arg PHP_PECL_EXTENSIONS=\"${PHP_PECL_EXTENSIONS}\" \
-    --build-arg APP_NAME=\"${APP_NAME}\" \
-    --build-arg APP_ENV=${APP_ENV} \
-    --build-arg APP_PORT=${APP_PORT} \
+    --build-arg PHP_CORE_EXTENSIONS=${PHP_CORE_EXTENSIONS} \
+    --build-arg PHP_PECL_EXTENSIONS=${PHP_PECL_EXTENSIONS} \
+    --build-arg VERSION=${VERSION} \
     --build-arg BUILD_DATE=\"${BUILD_DATE}\" \
     --build-arg VCS_REF=\"${VCS_REF}\""
 
-# Add install PHP tools flag based on environment
-if [ "${APP_ENV}" = "development" ]; then
-    BUILD_CMD="$BUILD_CMD --build-arg INSTALL_PHP_TOOLS=true"
-else
-    BUILD_CMD="$BUILD_CMD --build-arg INSTALL_PHP_TOOLS=false"
-fi
-
-# Add health check type for test builds
-if [ "$TEST_BUILD" = true ]; then
-    BUILD_CMD="$BUILD_CMD --build-arg HEALTH_CHECK_TYPE=comprehensive"
-    log_info "Building with comprehensive health check"
-fi
-
-# Add tags
-BUILD_CMD="$BUILD_CMD \
-    --tag ${FULL_IMAGE}:${VERSION} \
-    --tag ${FULL_IMAGE}:latest"
-
-# Add minor and major version tags
-MAJOR_VERSION=$(echo $VERSION | cut -d. -f1)
-MINOR_VERSION=$(echo $VERSION | cut -d. -f1-2)
-
-# Add tags
-if [ "$TEST_BUILD" = true ]; then
-    BUILD_CMD="$BUILD_CMD \
-        --tag ${FULL_IMAGE}:test \
-        --tag ${FULL_IMAGE}:test-${VERSION}"
-    log_info "Using test tags: test, test-${VERSION}"
-else
-    BUILD_CMD="$BUILD_CMD \
-        --tag ${FULL_IMAGE}:${VERSION} \
-        --tag ${FULL_IMAGE}:latest"
-    
-    # Add minor and major version tags
-    MAJOR_VERSION=$(echo $VERSION | cut -d. -f1)
-    MINOR_VERSION=$(echo $VERSION | cut -d. -f1-2)
-    BUILD_CMD="$BUILD_CMD \
-        --tag ${FULL_IMAGE}:${MAJOR_VERSION} \
-        --tag ${FULL_IMAGE}:${MINOR_VERSION}"
-fi
-
-# Add environment-specific tag
-if [ "${APP_ENV}" = "development" ]; then
-    BUILD_CMD="$BUILD_CMD --tag ${FULL_IMAGE}:dev"
-elif [ "${APP_ENV}" = "staging" ]; then
-    BUILD_CMD="$BUILD_CMD --tag ${FULL_IMAGE}:staging"
-elif [ "${APP_ENV}" = "production" ]; then
-    BUILD_CMD="$BUILD_CMD --tag ${FULL_IMAGE}:stable"
-fi
+# Target-specific build arguments and tags
+case $BUILD_TARGET in
+    base)
+        BUILD_CMD="$BUILD_CMD --target base"
+        BUILD_CMD="$BUILD_CMD --tag ${FULL_IMAGE}:base"
+        ;;
+        
+    production)
+        BUILD_CMD="$BUILD_CMD --target production"
+        BUILD_CMD="$BUILD_CMD \
+            --build-arg APP_ENV=production \
+            --build-arg PHP_OPCACHE_VALIDATE_TIMESTAMPS=0 \
+            --build-arg PHP_OPCACHE_MAX_ACCELERATED_FILES=20000 \
+            --build-arg PHP_OPCACHE_ENABLE=1 \
+            --build-arg PHP_OPCACHE_MEMORY_CONSUMPTION=256"
+        
+        # Production tags
+        BUILD_CMD="$BUILD_CMD \
+            --tag ${FULL_IMAGE}:${VERSION} \
+            --tag ${FULL_IMAGE}:latest"
+        
+        MAJOR_VERSION=$(echo $VERSION | cut -d. -f1)
+        MINOR_VERSION=$(echo $VERSION | cut -d. -f1-2)
+        BUILD_CMD="$BUILD_CMD \
+            --tag ${FULL_IMAGE}:${MAJOR_VERSION} \
+            --tag ${FULL_IMAGE}:${MINOR_VERSION}"
+        ;;
+        
+    dev)
+        BUILD_CMD="$BUILD_CMD --target dev"
+        BUILD_CMD="$BUILD_CMD \
+            --build-arg APP_ENV=development \
+            --build-arg SYMFONY_CLI_VERSION=${SYMFONY_CLI_VERSION} \
+            --build-arg XDEBUG_VERSION=${XDEBUG_VERSION} \
+            --build-arg XDEBUG_ENABLE=1"
+        
+        # Dev tags
+        BUILD_CMD="$BUILD_CMD \
+            --tag ${FULL_IMAGE}:dev \
+            --tag ${FULL_IMAGE}:dev-${VERSION}"
+        ;;
+esac
 
 # Add push flag if multi-platform and push requested
 if [ "$MULTI_PLATFORM" = true ] && [ "$PUSH_TO_HUB" = true ]; then
@@ -283,7 +304,7 @@ fi
 BUILD_CMD="$BUILD_CMD --file Dockerfile ."
 
 # Execute build
-log_step "Building Docker image..."
+log_step "Building Docker image (target: ${BUILD_TARGET})..."
 echo -e "${BLUE}Command:${NC} $BUILD_CMD"
 echo ""
 
@@ -307,95 +328,88 @@ if [ $? -eq 0 ]; then
         log_step "Image information:"
         docker images ${FULL_IMAGE} --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}\t{{.CreatedAt}}"
         
-        # Get image size
-        IMAGE_SIZE=$(docker images ${FULL_IMAGE}:latest --format "{{.Size}}")
+        IMAGE_SIZE=$(docker images ${FULL_IMAGE}:${BUILD_TARGET} --format "{{.Size}}" 2>/dev/null || echo "N/A")
         echo ""
         echo -e "${GREEN}Image size:${NC} ${IMAGE_SIZE}"
     fi
     
-    # Test the image if not multi-platform
-    if [ "$MULTI_PLATFORM" = false ]; then
+    # Test the image if not multi-platform and not base
+    if [ "$MULTI_PLATFORM" = false ] && [ "$BUILD_TARGET" != "base" ]; then
         echo ""
         log_step "Testing image..."
         
-        # Quick test
-        docker run --rm ${FULL_IMAGE}:${VERSION} php -v > /dev/null 2>&1
-        if [ $? -eq 0 ]; then
-            log_info "✓ PHP test passed"
-        else
-            log_warning "PHP test failed"
-        fi
+        TEST_TAG="${BUILD_TARGET}"
+        [ "$BUILD_TARGET" = "production" ] && TEST_TAG="latest"
         
-        docker run --rm ${FULL_IMAGE}:${VERSION} nginx -v > /dev/null 2>&1
-        if [ $? -eq 0 ]; then
-            log_info "✓ Nginx test passed"
-        else
-            log_warning "Nginx test failed"
-        fi
+        # Quick tests
+        docker run --rm ${FULL_IMAGE}:${TEST_TAG} php -v > /dev/null 2>&1 && log_info "✓ PHP test passed"
+        docker run --rm ${FULL_IMAGE}:${TEST_TAG} nginx -v > /dev/null 2>&1 && log_info "✓ Nginx test passed"
+        docker run --rm ${FULL_IMAGE}:${TEST_TAG} redis-server --version > /dev/null 2>&1 && log_info "✓ Redis test passed"
         
-        docker run --rm ${FULL_IMAGE}:${VERSION} redis-server --version > /dev/null 2>&1
-        if [ $? -eq 0 ]; then
-            log_info "✓ Redis test passed"
-        else
-            log_warning "Redis test failed"
+        if [ "$BUILD_TARGET" = "dev" ]; then
+            docker run --rm ${FULL_IMAGE}:dev php -m | grep -q xdebug && log_info "✓ Xdebug installed"
+            docker run --rm ${FULL_IMAGE}:dev symfony version > /dev/null 2>&1 && log_info "✓ Symfony CLI installed"
         fi
     fi
     
-    # Push to Docker Hub if requested and not already pushed (multi-platform)
+    # Push to Docker Hub if requested
     if [ "$PUSH_TO_HUB" = true ] && [ "$MULTI_PLATFORM" = false ]; then
         echo ""
         log_step "Pushing to Docker Hub..."
         
-        # Check if logged in
         if ! docker info 2>/dev/null | grep -q "Username"; then
             log_warning "Not logged in to Docker Hub. Logging in..."
             docker login -u ${DOCKER_HUB_USER}
-            
-            if [ $? -ne 0 ]; then
-                log_error "Failed to login to Docker Hub"
-            fi
+            [ $? -ne 0 ] && log_error "Failed to login to Docker Hub"
         fi
         
-        # Push all tags
-        for tag in ${VERSION} latest ${MAJOR_VERSION} ${MINOR_VERSION}; do
-            log_info "Pushing ${FULL_IMAGE}:${tag}..."
-            docker push ${FULL_IMAGE}:${tag}
-        done
-        
-        # Push environment-specific tag
-        if [ "${APP_ENV}" = "development" ]; then
-            docker push ${FULL_IMAGE}:dev
-        elif [ "${APP_ENV}" = "staging" ]; then
-            docker push ${FULL_IMAGE}:staging
-        elif [ "${APP_ENV}" = "production" ]; then
-            docker push ${FULL_IMAGE}:stable
-        fi
+        case $BUILD_TARGET in
+            production)
+                for tag in ${VERSION} latest ${MAJOR_VERSION} ${MINOR_VERSION}; do
+                    log_info "Pushing ${FULL_IMAGE}:${tag}..."
+                    docker push ${FULL_IMAGE}:${tag}
+                done
+                ;;
+            dev)
+                log_info "Pushing ${FULL_IMAGE}:dev..."
+                docker push ${FULL_IMAGE}:dev
+                docker push ${FULL_IMAGE}:dev-${VERSION}
+                ;;
+            base)
+                log_info "Pushing ${FULL_IMAGE}:base..."
+                docker push ${FULL_IMAGE}:base
+                ;;
+        esac
         
         echo ""
         log_info "✅ Push completed!"
-        echo ""
-        echo -e "${GREEN}Image available at:${NC}"
-        echo "  https://hub.docker.com/r/${FULL_IMAGE}"
+        echo -e "${GREEN}Image available at:${NC} https://hub.docker.com/r/${FULL_IMAGE}"
     fi
     
     # Show usage instructions
     echo ""
-    echo -e "${CYAN}═══ Usage Instructions ═══${NC}"
-    echo ""
-    echo "To run the container:"
-    echo -e "  ${YELLOW}docker run -d -p ${APP_PORT}:80 ${FULL_IMAGE}:${VERSION}${NC}"
-    echo ""
-    echo "To pull from Docker Hub:"
-    echo -e "  ${YELLOW}docker pull ${FULL_IMAGE}:latest${NC}"
+    echo -e "${CYAN}━━━ Usage Instructions ━━━${NC}"
     echo ""
     
-    if [ "$PUSH_TO_HUB" = false ]; then
-        echo "To push to Docker Hub:"
-        echo -e "  ${YELLOW}docker push ${FULL_IMAGE}:${VERSION}${NC}"
-        echo "Or run this script with --push flag:"
-        echo -e "  ${YELLOW}./build-from-env.sh --push${NC}"
-        echo ""
-    fi
+    case $BUILD_TARGET in
+        production)
+            echo "To run the production container:"
+            echo -e "  ${YELLOW}docker run -d -p 8080:80 ${FULL_IMAGE}:latest${NC}"
+            ;;
+        dev)
+            echo "To run the dev container with Xdebug:"
+            echo -e "  ${YELLOW}docker run -d -p 8080:80 -p 9003:9003 -e XDEBUG_ENABLE=1 ${FULL_IMAGE}:dev${NC}"
+            ;;
+        base)
+            echo "Base image built successfully (foundation layer)"
+            echo "Use as base for production or dev stages"
+            ;;
+    esac
+    
+    echo ""
+    echo "To pull from Docker Hub:"
+    echo -e "  ${YELLOW}docker pull ${FULL_IMAGE}:${BUILD_TARGET}${NC}"
+    echo ""
     
 else
     log_error "❌ Build failed! Check the error messages above."
@@ -403,7 +417,6 @@ fi
 
 # Cleanup buildx if it was created
 if [ "$MULTI_PLATFORM" = true ]; then
-    # Don't remove the builder, keep it for future use
     log_info "Builder 'php-api-stack-builder' kept for future use"
     log_info "To remove: docker buildx rm php-api-stack-builder"
 fi

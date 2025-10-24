@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       - DEMO_MODE=true
+      - HEALTH_CHECK_INSTALL=true
     env_file:
       - .env
     ports:

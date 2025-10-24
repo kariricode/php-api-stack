@@ -6,16 +6,18 @@
 !.env.dev
 
 # Application
-app/vendor/
-app/node_modules/
-app/var/
-app/.env
-app/.env.local
+./app/vendor/
+./app/node_modules/
+./app/var/
+./app/.env
+./app/.env.local
+./app/public/health.php
+./app/public/index.php
 
 # Logs
-logs/
+./logs/
 *.log
-/var/log/
+.//var/log/
 
 # Docker
 docker-compose.override.yml
@@ -23,14 +25,13 @@ docker-compose.override.yml
 *.tar.gz
 
 # SSL certificates
-ssl/
+./ssl/
 *.pem
 *.key
 *.crt
 
 # IDE
 .idea/
-.vscode/
 *.swp
 *.swo
 *~
@@ -40,8 +41,8 @@ ssl/
 Thumbs.db
 
 # Build artifacts
-build/
-dist/
+./build/
+./dist/
 
 # Test files
 test-app/

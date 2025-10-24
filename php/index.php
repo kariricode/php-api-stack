@@ -18,7 +18,7 @@ namespace KaririCode\PhpApiStack\Demo;
 // Security: Prevent direct access in production environments
 if (getenv('APP_ENV') === 'production' && !getenv('DEMO_MODE')) {
     http_response_code(404);
-    exit('Not Found');
+    exit('Not Found Walmir');
 }
 
 /**
@@ -159,6 +159,31 @@ final class RedisCheck extends AbstractComponentCheck
         return 'Redis';
     }
 
+
+    /**
+     * Smart Redis Host Resolution
+     * 
+     * Tenta resolver o hostname. Se falhar, usa 127.0.0.1 (standalone mode).
+     */
+    protected function getRedisHost(): string
+    {
+        $host = getenv('REDIS_HOST') ?: '127.0.0.1';
+
+        // Se for "redis" (docker-compose), verifica se resolve
+        if ($host === 'redis') {
+            // Suprime warning de DNS
+            $resolved = @gethostbyname($host);
+
+            // Se não resolveu (retorna o próprio hostname), usa localhost
+            if ($resolved === $host) {
+                return '127.0.0.1';
+            }
+        }
+
+        return $host;
+    }
+
+
     protected function performCheck(): StatusResult
     {
         if (!extension_loaded('redis')) {
@@ -171,8 +196,12 @@ final class RedisCheck extends AbstractComponentCheck
 
         $redis = new \Redis();
 
+        $host = $this->getRedisHost();
+        $password = getenv('REDIS_PASSWORD') ?: null;
+        $port = 6379;
+
         try {
-            $connected = @$redis->connect('127.0.0.1', 6379, 1.0);
+            $connected = @$redis->connect($host, $port, 1.0);
 
             if (!$connected) {
                 return new StatusResult(
@@ -181,6 +210,18 @@ final class RedisCheck extends AbstractComponentCheck
                     details: []
                 );
             }
+
+
+            if ($password !== null && $password !== '') {
+                if (!@$redis->auth($password)) {
+                    return new StatusResult(
+                        healthy: false,
+                        message: 'Redis authentication failed (NOAUTH). Check REDIS_PASSWORD.',
+                        details: ['host' => $host]
+                    );
+                }
+            }
+
 
             $pong = $redis->ping();
 
@@ -583,7 +624,6 @@ $stackInfo = [
                 <h2>Quick Links</h2>
                 <div class="quick-links">
                     <a href="/health.php" class="quick-link">Health Check</a>
-                    <a href="/fpm-status" class="quick-link">PHP-FPM Status</a>
                     <a href="https://github.com/kariricode/php-api-stack" class="quick-link" target="_blank">Documentation</a>
                     <a href="https://hub.docker.com/r/kariricode/php-api-stack" class="quick-link" target="_blank">Docker Hub</a>
                 </div>
