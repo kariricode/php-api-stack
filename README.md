@@ -4,6 +4,7 @@
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/kariricode/php-api-stack)](https://hub.docker.com/r/kariricode/php-api-stack)
 [![Docker Image Size](https://img.shields.io/docker/image-size/kariricode/php-api-stack/latest)](https://hub.docker.com/r/kariricode/php-api-stack)
+[![Docker Image Version](https://img.shields.io/docker/v/kariricode/php-api-stack?sort=semver)](https://hub.docker.com/r/kariricode/php-api-stack)
 [![License](https://img.shields.io/github/license/kariricode/php-api-stack)](LICENSE)
 [![Build Status](https://img.shields.io/github/actions/workflow/status/kariricode/php-api-stack/build.yml)](https://github.com/kariricode/php-api-stack/actions)
 
@@ -22,26 +23,26 @@
 - 🔴 **Redis 7.2** for caching and session management
 - 🎯 **Production-ready** with security hardening and performance tuning
 - 📊 **Comprehensive health checks** for monitoring and orchestration
-- 🛠️ **Developer-friendly** with extensive Make targets and examples
+- 🛠️ **Developer-friendly** with extensive Make targets (50+) and examples
 - 🔒 **Security-first** with rate limiting, headers, and vulnerability scanning
 - 📦 **Multi-platform** support (amd64, arm64)
 - 🎭 **Flexible deployment** via Docker or Docker Compose with profiles
+- 🧰 **Three specialized Makefiles** for building, Docker Hub, and Compose operations
 
 ---
 
 ## 🚀 Quick Start
 
-### Option 1: Docker Run (Simple)
+### Option 1: Docker Run (Simplest)
 
 ```bash
-# Pull the image
+# Pull and run with demo page
 docker pull kariricode/php-api-stack:latest
-
-# Run with demo page
 docker run -d -p 8080:80 --name my-api kariricode/php-api-stack:latest
 
 # Access the demo
-open http://localhost:8080
+curl http://localhost:8080
+# or open http://localhost:8080 in browser
 ```
 
 ### Option 2: With Your Application
@@ -50,28 +51,35 @@ open http://localhost:8080
 docker run -d \
   -p 8080:80 \
   -v $(pwd)/app:/var/www/html \
-  --env-file .env \
+  -v $(pwd)/.env:/var/www/html/.env:ro \
+  -e APP_ENV=production \
   --name my-api \
   kariricode/php-api-stack:latest
 ```
 
-### Option 3: Docker Compose (Recommended for Development)
+### Option 3: Docker Compose (Recommended)
 
 ```bash
-# Copy example files
+# Setup
 cp .env.example .env
 cp docker-compose.example.yml docker-compose.yml
 
-# Start with profiles
+# Start base services
+make compose-up
+
+# Start with database + monitoring
 make compose-up PROFILES="db,monitoring"
 
 # Or start everything
 make compose-up-all
+
+# Access
+open http://localhost:8089          # Application
+open http://localhost:8089/health   # Health check
+open http://localhost:3000          # Grafana (admin/password)
 ```
 
 **📖 See [DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md) for complete Docker Compose documentation**
-
-✅ **The stack is ready with demo page, health checks, and all services running.**
 
 ---
 
@@ -79,193 +87,302 @@ make compose-up-all
 
 | Document | Audience | Description |
 |----------|----------|-------------|
-| **[IMAGE_USAGE_GUIDE.md](IMAGE_USAGE_GUIDE.md)** | End Users | How to use the published image |
-| **[DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md)** | Developers | Complete Docker Compose setup guide |
-| **[TESTING.md](TESTING.md)** | Maintainers | Complete testing guide |
-| **[DOCKER_HUB.md](DOCKER_HUB.md)** | Publishers | How to publish to Docker Hub |
+| **[IMAGE_USAGE_GUIDE.md](IMAGE_USAGE_GUIDE.md)** | End Users | How to use the published Docker image |
+| **[DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md)** | Developers | Complete Docker Compose orchestration guide |
+| **[TESTING.md](TESTING.md)** | Maintainers | Comprehensive testing procedures |
+| **[DOCKER_HUB.md](DOCKER_HUB.md)** | Publishers | Docker Hub publication workflow |
 
 ---
 
 ## 🗃️ Architecture
 
 ```
-Client → Nginx (port 80) → PHP-FPM (Unix socket) → PHP Application
-              ↓                    ↓
-         FastCGI Cache         Redis (sessions/cache)
+                    ┌─────────────────────────────────┐
+                    │         Client Request          │
+                    └─────────────┬───────────────────┘
+                                  │
+                    ┌─────────────▼───────────────────┐
+                    │   Nginx (port 80)               │
+                    │   • FastCGI Cache               │
+                    │   • Rate Limiting               │
+                    │   • Security Headers            │
+                    └─────────────┬───────────────────┘
+                                  │ Unix Socket
+                    ┌─────────────▼───────────────────┐
+                    │   PHP-FPM 8.4                   │
+                    │   • OPcache + JIT               │
+                    │   • Pool Manager (60 children)  │
+                    └─────────────┬───────────────────┘
+                                  │
+                    ┌─────────────▼───────────────────┐
+                    │   PHP Application               │
+                    │   • Framework (Symfony/Laravel) │
+                    │   • Business Logic              │
+                    └─────────────┬───────────────────┘
+                                  │
+                    ┌─────────────▼───────────────────┐
+                    │   Redis (sessions/cache)        │
+                    │   • AOF Persistence             │
+                    │   • LRU Eviction                │
+                    └─────────────────────────────────┘
 ```
 
-**Container Management**: Services managed by custom entrypoint with health monitoring
+**Container Management**: All services orchestrated by custom entrypoint with health monitoring and graceful shutdown
 
 ---
 
 ## 📦 Stack Components
 
-| Component | Version | Purpose |
-|-----------|---------|---------|
-| **PHP-FPM** | 8.4 | PHP processing with optimized pool |
-| **Nginx** | 1.27.3 | High-performance web server |
-| **Redis** | 7.2 | Cache and session management |
-| **Composer** | 2.8.12 | PHP dependency manager |
-| **Symfony CLI** | 5.15.1 | Symfony tools (dev build only) |
+| Component | Version | Purpose | Configuration |
+|-----------|---------|---------|--------------|
+| **PHP-FPM** | 8.4.13 | PHP processing | Optimized pool, OPcache JIT |
+| **Nginx** | 1.27.3 | Web server | FastCGI cache, rate limiting |
+| **Redis** | 7.2.11 | Cache & sessions | AOF persistence, LRU eviction |
+| **Composer** | 2.8.12 | Dependency manager | Included in production |
+| **Symfony CLI** | 5.15.1 | Symfony tools | Dev image only |
+| **Xdebug** | 3.4.6 | PHP debugger | Dev image only (optional) |
 
 ---
 
 ## 📌 PHP Extensions
 
-### Core Extensions (Installed)
+### Core Extensions (Pre-installed)
 ```
 pdo, pdo_mysql, opcache, intl, zip, bcmath, gd, mbstring, xml, sockets
 ```
 
-### PECL Extensions (Installed)
+### PECL Extensions (Pre-installed)
 ```
-redis, apcu, uuid
-```
-
-### Built-in Extensions (Auto-available)
-```
-json, curl, fileinfo, ctype, iconv, session, tokenizer, filter
+redis (6.1.0), apcu (5.1.24), uuid (1.2.1), imagick (3.7.0), amqp (2.1.2)
 ```
 
-**Add more?** Edit `.env` and rebuild:
+### Built-in Extensions (Always Available)
+```
+json, curl, fileinfo, ctype, iconv, session, tokenizer, filter, hash, openssl
+```
+
+### Adding Custom Extensions
+
+Edit `.env` before building:
 ```bash
-PHP_CORE_EXTENSIONS="... newext"
+# Add your extension to the list
+PHP_CORE_EXTENSIONS="pdo pdo_mysql opcache intl zip bcmath gd mbstring xml sockets mysqli"
+PHP_PECL_EXTENSIONS="redis apcu uuid xdebug"
+
+# Rebuild
 make build
 ```
+
+**Note**: For production images, extensions are optimized and loaded automatically.
 
 ---
 
 ## ⚙️ Configuration
 
-All configurations via `.env` file:
+All configuration is managed via `.env` file with extensive customization options:
+
+### Essential Variables
 
 ```bash
-# PHP Performance
-PHP_MEMORY_LIMIT=256M
-PHP_OPCACHE_MEMORY=256
-PHP_OPCACHE_JIT=tracing
-PHP_FPM_PM_MAX_CHILDREN=60
-
 # Environment
-APP_ENV=production
-APP_DEBUG=false
-PHP_DISPLAY_ERRORS=Off
+APP_ENV=production                    # production|development|test
+APP_DEBUG=false                       # Enable debug mode (dev only)
 
-# Extensions
-PHP_CORE_EXTENSIONS="pdo pdo_mysql opcache..."
-PHP_PECL_EXTENSIONS="redis apcu uuid"
+# PHP Performance
+PHP_MEMORY_LIMIT=256M                 # Memory limit per request
+PHP_MAX_EXECUTION_TIME=60             # Script timeout
+PHP_OPCACHE_MEMORY=256                # OPcache memory (MB)
+PHP_OPCACHE_JIT=tracing               # JIT mode: off|tracing|function
+PHP_OPCACHE_ENABLE=1                  # Enable OPcache (always 1 in prod)
+
+# PHP-FPM Pool
+PHP_FPM_PM=dynamic                    # Process manager mode
+PHP_FPM_PM_MAX_CHILDREN=60            # Max child processes
+PHP_FPM_PM_START_SERVERS=10           # Initial servers
+PHP_FPM_PM_MIN_SPARE_SERVERS=5        # Min idle servers
+PHP_FPM_PM_MAX_SPARE_SERVERS=20       # Max idle servers
+
+# Redis
+REDIS_HOST=127.0.0.1                  # Redis host (standalone mode)
+REDIS_PASSWORD=your-secure-password   # Redis authentication
+REDIS_DATABASES=16                    # Number of databases
+REDIS_MAXMEMORY=256mb                 # Max memory usage
+REDIS_MAXMEMORY_POLICY=allkeys-lru    # Eviction policy
+
+# Nginx
+NGINX_WORKER_PROCESSES=auto           # Worker processes (auto = CPU cores)
+NGINX_WORKER_CONNECTIONS=2048         # Connections per worker
+NGINX_KEEPALIVE_TIMEOUT=65            # Keep-alive timeout
+NGINX_CLIENT_MAX_BODY_SIZE=20M        # Max upload size
 ```
 
-**Full reference**: See `.env.example`
+### Development Mode
+
+```bash
+APP_ENV=development
+APP_DEBUG=true
+PHP_DISPLAY_ERRORS=On
+PHP_OPCACHE_VALIDATE_TIMESTAMPS=1     # Reload PHP files without restart
+XDEBUG_ENABLE=1                       # Enable Xdebug
+```
+
+**Full reference**: Copy `.env.example` and customize for your needs.
 
 ---
 
 ## 🧰 Makefile Commands
 
-The project includes a comprehensive Makefile with **logically organized targets by similarity**. Run `make help` for the complete list.
+The project includes **three specialized Makefiles** for different purposes:
+
+### 📁 Makefile Organization
+
+| Makefile | Purpose | Commands |
+|----------|---------|----------|
+| **Makefile** | Build, test, run containers | 40+ commands |
+| **Makefile.dockerhub** | Docker Hub operations | Version management, tagging, push, release |
+| **Makefile.compose** | Docker Compose orchestration | Multi-service management |
+
+Run `make help` for the main menu, or specialized help:
+- `make hub-help` - Docker Hub commands
+- `make compose-help` - Docker Compose commands
+
+---
 
 ### 🏗️ Build Targets
 
 ```bash
-make build              # Build production image
-make build-dev          # Build dev image (with Symfony CLI, optional Xdebug)
-make build-no-cache     # Build without cache
-make build-test-image   # Build test image with comprehensive health check
+make build              # Build production image (optimized)
+make build-dev          # Build dev image (Symfony CLI + optional Xdebug)
+make build-base         # Build base layer only (for debugging)
+make build-test         # Build test image with comprehensive health check
+make build-all          # Build both production and dev images
 make lint               # Lint Dockerfile with hadolint
-make scan               # Scan for vulnerabilities with Trivy
+make scan               # Security scan with Trivy
+make scan-dev           # Scan dev image for vulnerabilities
 ```
 
 ### 🚀 Runtime - Run Containers
 
 ```bash
-make run                # Run local container (port 8080)
-make run-dev            # Run development container (port 8001, Xdebug ready)
-make run-test           # Run test container with comprehensive health checks
+make run                # Run production container (port 8080)
+make run-dev            # Run dev container (port 8001, Xdebug on 9003)
+make run-test           # Run test container with health monitoring
 ```
 
 ### ⏹️ Runtime - Stop & Restart
 
 ```bash
-make stop               # Stop and remove local container
-make stop-dev           # Stop and remove dev container
-make stop-test          # Stop and remove test container
-make restart            # Restart local container
-make restart-dev        # Restart development container
-make restart-test       # Restart test container
+make stop               # Stop production container
+make stop-dev           # Stop dev container
+make stop-test          # Stop test container
+make restart            # Restart production container
+make restart-dev        # Restart dev container
 ```
 
 ### 📋 Runtime - Logs & Shell
 
 ```bash
-make logs               # View local container logs (follow)
-make logs-dev           # View development container logs
-make logs-test          # View test container logs
-make shell              # Access local container shell (alias: exec)
-make shell-dev          # Access development container shell
-make shell-test         # Access test container shell
-make stats              # Show container resource usage
+make logs               # Follow production logs
+make logs-dev           # Follow dev logs
+make shell              # Open shell in production container
+make shell-dev          # Open shell in dev container
 ```
 
 ### 🧪 Test Targets
 
 ```bash
-make test               # Run full test suite (versions, config, health)
+make test               # Run comprehensive test suite
 make test-quick         # Quick component version checks
-make test-structure     # Test container structure and directories
-make test-health        # Test comprehensive health check endpoint
-make test-health-status # Show health check status summary
-make test-health-watch  # Live health monitoring (updates every 5s)
+make test-structure     # Validate container structure
+make test-health        # Test health check endpoint
 ```
 
-### 📤 Push & Publish Targets
+---
+
+### 🐳 Docker Hub Commands
+
+These commands are in **Makefile.dockerhub**. Run `make hub-help` for complete list.
+
+#### Version Management
 
 ```bash
-make push               # Push all tags to Docker Hub
-make push-dev           # Push dev image with custom tag (IMAGE_TAG=xxx)
-make publish-dev        # Build and push dev image (build-dev + push-dev)
+make version            # Show current version
+make bump-patch         # Bump patch (1.5.0 → 1.5.1)
+make bump-minor         # Bump minor (1.5.0 → 1.6.0)
+make bump-major         # Bump major (1.5.0 → 2.0.0)
 ```
 
-### 🏷️ Release & Versioning
+#### Tagging & Push
 
 ```bash
-make tag-latest         # Tag current version as latest/major/minor
-make release            # Full release pipeline (lint+build+test+scan+push)
-make version            # Display current version
-make bump-patch         # Bump patch version (x.x.X)
-make bump-minor         # Bump minor version (x.X.x)
-make bump-major         # Bump major version (X.x.x)
+make tag-production     # Tag production image (latest, 1, 1.5, 1.5.0)
+make tag-dev            # Tag dev image (dev only)
+make push-production    # Push all production tags
+make push-dev           # Push dev tag
+make push-all           # Push all images
 ```
 
-### 🧹 Cleanup Targets
+#### Complete Workflows
 
 ```bash
-make clean              # Remove local images and containers
-make clean-all          # Deep clean (volumes + build cache)
+make publish-production # Build + Tag + Push production
+make publish-dev        # Build + Tag + Push dev
+make release-production # Full release: pre-check + build + test + scan + push
+make release-all        # Release both production and dev
 ```
 
-### ℹ️ Information Targets
+#### Hub Utilities
 
 ```bash
-make info               # Show image information (tags, sizes)
+make hub-check          # Check if images exist on Docker Hub
+make hub-tags           # List all published tags
+make hub-info           # Show repository information
+make hub-clean          # Remove old local tags
+make pre-release-check  # Validate before release (git, docker, auth)
 ```
 
-### 🐳 Docker Compose Targets
+**Example Release Workflow:**
+```bash
+make bump-minor         # 1.5.0 → 1.6.0
+make release-production # Full automated release
+```
 
-For complete infrastructure setup with databases, load balancers, and monitoring:
+---
+
+### 🎭 Docker Compose Commands
+
+These commands are in **Makefile.compose**. Run `make compose-help` for complete list.
+
+#### Lifecycle
 
 ```bash
-make compose-help       # Show Docker Compose help
-make compose-up         # Start services (respects PROFILES)
-make compose-up-all     # Start with all profiles (loadbalancer,monitoring)
-make compose-down-v     # Stop and remove volumes
-make compose-down-all   # Stop everything including all profiles
-make compose-logs       # Tail logs for active services
-make compose-logs-all   # Tail logs for all services
-make compose-ps         # Show container status
-make compose-shell      # Access service shell (default: php-api-stack)
+make compose-up              # Start services (respects PROFILES)
+make compose-up-all          # Start with all profiles
+make compose-down-v          # Stop and remove volumes
+make compose-down-all        # Stop everything + all profiles
+make compose-restart         # Restart services
+make compose-ps              # Show service status
 ```
 
-**Profile Examples:**
+#### Logs & Shell
+
+```bash
+make compose-logs            # Tail logs (all active services)
+make compose-logs-all        # Tail logs (base + all profiles)
+make compose-logs-svc        # Tail logs for specific services
+make compose-shell           # Open shell in service
+make compose-exec            # Execute command in service
+```
+
+#### Utilities
+
+```bash
+make compose-config          # Show resolved config
+make compose-health          # Test health endpoint
+make compose-open            # Open app/Prometheus/Grafana in browser
+```
+
+**Example with Profiles:**
 ```bash
 # Start with database
 make compose-up PROFILES="db"
@@ -273,142 +390,163 @@ make compose-up PROFILES="db"
 # Start with monitoring
 make compose-up PROFILES="monitoring"
 
-# Start with multiple profiles
-make compose-up PROFILES="db,monitoring"
-
 # Start specific services
 make compose-up-svc SERVICES="php-api-stack mysql"
 
-# View logs for specific service
+# View specific logs
 make compose-logs-svc SERVICES="php-api-stack"
 ```
+
+---
 
 ### Quick Workflow Examples
 
 **Development Workflow:**
 ```bash
 make build-dev          # Build dev image
-make run-dev            # Start dev container (with Xdebug)
-make logs-dev           # View dev logs
-make shell-dev          # Access dev container
-make restart-dev        # Restart dev container
-make stop-dev           # Stop dev container
+make run-dev            # Start dev (port 8001, Xdebug ready)
+make logs-dev           # View logs
+make shell-dev          # Access container
+curl http://localhost:8001/health
 ```
 
 **Testing Workflow:**
 ```bash
-make build-test-image   # Build test image
+make build-test         # Build with comprehensive health check
 make run-test           # Start test container
-make test-health-watch  # Monitor health in real-time
-make logs-test          # View test logs
-make stop-test          # Stop test container
+make test-health        # Test health endpoint
+make logs-test          # View logs
 ```
 
 **Release Workflow:**
 ```bash
 make lint               # Lint Dockerfile
-make build              # Build production image
+make build-all          # Build production + dev
 make test               # Run tests
 make scan               # Security scan
 make bump-patch         # Bump version
-make release            # Full release pipeline
+make release-all        # Full release pipeline
+make hub-check          # Verify on Docker Hub
+```
+
+**Docker Compose Workflow:**
+```bash
+make compose-up-all     # Start all services
+make compose-ps         # Check status
+make compose-logs       # View logs
+make compose-open       # Open in browser
+make compose-down-all   # Stop everything
 ```
 
 ---
 
 ## 🐳 Docker Compose
 
-The project includes a complete `docker-compose.example.yml` with multiple service profiles:
+Complete orchestration with databases, load balancing, and monitoring.
 
 ### Available Profiles
 
-- **Base** (always active): `php-api-stack` - The main application container
-- **db**: MySQL database with optimized configuration
-- **loadbalancer**: Nginx load balancer for scaling
-- **monitoring**: Prometheus + Grafana + cAdvisor stack
+| Profile | Services | Purpose |
+|---------|----------|---------|
+| **Base** | php-api-stack | Main application (always active) |
+| **db** | mysql, redis-external | Databases with persistence |
+| **loadbalancer** | nginx-lb | Nginx load balancer for scaling |
+| **monitoring** | prometheus, grafana, cadvisor | Full monitoring stack |
 
 ### Quick Start
 
 ```bash
-# 1. Setup environment
+# 1. Setup
 cp .env.example .env
 cp docker-compose.example.yml docker-compose.yml
 
-# 2. Start base services
+# 2. Start base
 make compose-up
 
-# 3. Start with database
-make compose-up PROFILES="db"
+# 3. Start with profiles
+make compose-up PROFILES="db,monitoring"
 
-# 4. Start with monitoring
-make compose-up PROFILES="monitoring"
+# 4. Or start everything
+make compose-up-all
 
-# 5. Start everything
-make compose-up-all  # Equivalent to PROFILES="loadbalancer,monitoring"
-
-# 6. View services
-make compose-ps
-
-# 7. View logs
-make compose-logs
-
-# 8. Access application
-open http://localhost:8089
-
-# 9. Access monitoring (if enabled)
-open http://localhost:3000  # Grafana (admin/HmlGrafana_7uV4mRp)
-open http://localhost:9091  # Prometheus
+# 5. Access services
+make compose-open  # Opens app, Prometheus, Grafana
 ```
 
 ### Service URLs
 
-When all profiles are active:
-
-| Service | URL | Description |
+| Service | URL | Credentials |
 |---------|-----|-------------|
-| Application | http://localhost:8089 | Main PHP application |
-| Health Check | http://localhost:8089/health.php | Comprehensive health endpoint |
-| Prometheus | http://localhost:9091 | Metrics collection |
-| Grafana | http://localhost:3000 | Monitoring dashboards |
-| MySQL | localhost:3307 | Database (if db profile enabled) |
+| **Application** | http://localhost:8089 | - |
+| **Health Check** | http://localhost:8089/health | - |
+| **Prometheus** | http://localhost:9091 | - |
+| **Grafana** | http://localhost:3000 | admin / HmlGrafana_7uV4mRp |
+| **MySQL** | localhost:3307 | root / HmlMysql_9tQ2wRx |
 
-**📖 Complete guide with examples**: [DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md)
+### Management
+
+```bash
+# View status
+make compose-ps
+
+# View logs
+make compose-logs
+
+# Restart services
+make compose-restart
+
+# Scale application
+docker compose up -d --scale php-api-stack=3
+
+# Stop everything
+make compose-down-all
+```
+
+**📖 Complete guide**: [DOCKER_COMPOSE_GUIDE.md](DOCKER_COMPOSE_GUIDE.md)
 
 ---
 
 ## 🛠️ Development Workflow
 
-### For Maintainers (GitHub)
+### For Maintainers
 
 ```bash
-# Clone and build
+# 1. Clone and setup
 git clone https://github.com/kariricode/php-api-stack.git
 cd php-api-stack
-make build
+cp .env.example .env
 
-# Run tests
+# 2. Build
+make build-all
+
+# 3. Test
 make test
+make scan
 
-# Run with comprehensive health check
-make run-test
-make test-health
+# 4. Run dev
+make run-dev
+curl http://localhost:8001/health
 
-# Release
+# 5. Release
 make bump-patch
-make release
+make release-production
 ```
 
 **Complete guide**: [TESTING.md](TESTING.md)
 
-### For Publishers (Docker Hub)
+### For Publishers
 
 ```bash
-# Build and push
-make build
-make push
+# Quick release
+make release-production
 
-# Or full release
-make release  # lint + build + test + scan + push
+# Or step by step
+make lint
+make build
+make test
+make scan
+make bump-patch
+make push-production
 ```
 
 **Complete guide**: [DOCKER_HUB.md](DOCKER_HUB.md)
@@ -416,12 +554,9 @@ make release  # lint + build + test + scan + push
 ### For End Users
 
 ```bash
-# Pull image
+# Pull and run
 docker pull kariricode/php-api-stack:latest
-
-# Run with your app
-docker run -d \
-  -p 8080:80 \
+docker run -d -p 8080:80 \
   -v $(pwd)/app:/var/www/html \
   kariricode/php-api-stack:latest
 ```
@@ -432,157 +567,438 @@ docker run -d \
 
 ## 🏥 Health Check System
 
-The stack includes **two health check implementations**:
+Two health check implementations for different needs:
 
-### Simple Health Check (Production)
+### 1. Simple Health Check (Production)
+
+Lightweight endpoint for load balancers and orchestrators:
+
 ```bash
 curl http://localhost:8080/health
-# {"status":"healthy","timestamp":"2025-10-17T14:30:00+00:00"}
 ```
 
-### Comprehensive Health Check (Testing/Monitoring)
+**Response:**
+```json
+{
+  "status": "healthy",
+  "timestamp": "2025-10-24T22:00:00+00:00"
+}
+```
+
+### 2. Comprehensive Health Check (Monitoring)
+
+Detailed system diagnostics with component-level checks:
+
 ```bash
 curl http://localhost:8080/health.php | jq
 ```
 
 **Features:**
-- ✅ PHP Runtime validation (version, memory, SAPI)
-- ✅ PHP Extensions check (required + optional)
-- ✅ OPcache performance (memory, hit rate, JIT status)
-- ✅ Redis connectivity (latency, stats, memory)
-- ✅ System resources (disk, CPU load, memory)
-- ✅ Application directories (permissions, accessibility)
+- ✅ **PHP Runtime**: Version, memory, SAPI, configuration
+- ✅ **PHP Extensions**: Required and optional extensions validation
+- ✅ **OPcache**: Hit rate, memory usage, JIT status, cached scripts
+- ✅ **Redis**: Connectivity, latency, stats, memory usage, persistence
+- ✅ **System Resources**: Disk space, CPU load, memory usage
+- ✅ **Application**: Directory permissions, accessibility checks
 
-**Architecture**: SOLID principles, Design Patterns (Strategy, Template Method, Facade)
-
-**Build with comprehensive health**:
-```bash
-make build-test-image
-make run-test
-make test-health
+**Response Structure:**
+```json
+{
+  "status": "healthy|degraded|unhealthy",
+  "timestamp": "2025-10-24T22:00:00+00:00",
+  "overall": "✓ All Systems Operational",
+  "components": {
+    "php": { "status": "healthy", "details": {...} },
+    "opcache": { "status": "healthy", "details": {...} },
+    "redis": { "status": "healthy", "details": {...} },
+    "system": { "status": "healthy", "details": {...} },
+    "application": { "status": "healthy", "details": {...} }
+  },
+  "stack_info": {
+    "docker_image": "kariricode/php-api-stack",
+    "version": "1.5.0",
+    "php_version": "8.4.13"
+  }
+}
 ```
+
+### Using Health Checks
+
+**With Docker:**
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost/health || exit 1
+```
+
+**With Docker Compose:**
+```yaml
+services:
+  app:
+    image: kariricode/php-api-stack:latest
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+```
+
+**With Kubernetes:**
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 80
+  initialDelaySeconds: 5
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /health.php
+    port: 80
+  initialDelaySeconds: 10
+  periodSeconds: 10
+```
+
+**Makefile Commands:**
+```bash
+make test-health          # Test comprehensive health check
+make test-health-status   # Show health summary
+make test-health-watch    # Live monitoring (updates every 5s)
+```
+
+**Architecture**: Built with SOLID principles using Strategy, Template Method, and Facade patterns.
 
 ---
 
 ## 🔐 Security Features
 
-- ✅ Security headers (X-Frame-Options, CSP, HSTS)
-- ✅ Rate limiting (general: 10r/s, API: 100r/s)
-- ✅ Disabled dangerous PHP functions
-- ✅ Open basedir restrictions
-- ✅ Hidden server tokens
+Production-hardened security configuration:
+
+### Nginx Security
+
+- ✅ **Security Headers**: X-Frame-Options, X-Content-Type-Options, CSP, HSTS
+- ✅ **Rate Limiting**: 
+  - General: 10 req/s per IP
+  - API endpoints: 100 req/s per IP
+- ✅ **Hidden Tokens**: Server version and tokens hidden
+- ✅ **Request Filtering**: Protection against common attacks
+
+### PHP Security
+
+- ✅ **Disabled Functions**: `exec`, `shell_exec`, `system`, `passthru`, etc.
+- ✅ **Open Basedir**: Restricted to `/var/www/html` and `/tmp`
+- ✅ **Expose PHP**: Off (version hidden)
+- ✅ **File Uploads**: Configurable with size limits
+- ✅ **Session Security**: Secure cookies, HTTP-only
+
+### Redis Security
+
+- ✅ **Authentication**: Password-protected (configurable)
+- ✅ **Bind Address**: Internal only (127.0.0.1 or network)
+- ✅ **Command Renaming**: Dangerous commands can be disabled
+- ✅ **Persistence**: AOF with fsync control
+
+### Container Security
+
+- ✅ **Non-root User**: Application runs as `www-data`
+- ✅ **Read-only Filesystem**: Where possible
+- ✅ **Resource Limits**: CPU and memory constraints
+- ✅ **Security Scanning**: Automated Trivy scans
+
+**Scan for vulnerabilities:**
+```bash
+make scan       # Scan production image
+make scan-dev   # Scan dev image
+```
 
 ---
 
 ## 🛠 Troubleshooting
 
-### Container won't start
+### Container Won't Start
+
 ```bash
+# Check logs
 docker logs <container-id>
+
+# Test structure
 make test-structure
+
+# Check entrypoint
+docker run --rm kariricode/php-api-stack:latest cat /entrypoint.sh
 ```
 
 ### 502 Bad Gateway
+
 ```bash
 # Check PHP-FPM socket
 docker exec <container> ls -la /var/run/php/php-fpm.sock
+
+# Check PHP-FPM status
+docker exec <container> php-fpm -t
 
 # Check logs
 make logs
 ```
 
-### Poor Performance
+### Redis Connection Issues
+
+**Standalone Mode:**
 ```bash
-docker stats <container>
-docker exec <container> php -r "print_r(opcache_get_status());"
+# Should use 127.0.0.1
+docker exec <container> env | grep REDIS_HOST
+# REDIS_HOST=127.0.0.1
+
+# Test connection
+docker exec <container> redis-cli -h 127.0.0.1 -a "$REDIS_PASSWORD" ping
 ```
 
-**Full troubleshooting**: [IMAGE_USAGE_GUIDE.md](IMAGE_USAGE_GUIDE.md)
+**Docker Compose Mode:**
+```bash
+# Should use 'redis' (service name)
+docker compose exec php-api-stack env | grep REDIS_HOST
+# REDIS_HOST=redis
+
+# Test connection
+docker compose exec php-api-stack redis-cli -h redis -a "$REDIS_PASSWORD" ping
+```
+
+### Poor Performance
+
+```bash
+# Check container resources
+docker stats <container>
+
+# Check OPcache status
+docker exec <container> php -r "print_r(opcache_get_status());"
+
+# Check PHP-FPM pool
+docker exec <container> cat /var/run/php/php-fpm.pid
+docker exec <container> kill -USR2 $(cat /var/run/php/php-fpm.pid)
+```
+
+### Permission Issues
+
+```bash
+# Check ownership
+docker exec <container> ls -la /var/www/html
+
+# Fix permissions
+docker exec <container> chown -R www-data:www-data /var/www/html
+```
+
+**Full troubleshooting guide**: [IMAGE_USAGE_GUIDE.md](IMAGE_USAGE_GUIDE.md#troubleshooting)
 
 ---
 
-## 📖 Documentation Reference
+## 📖 External References
 
 - [PHP 8.4 Documentation](https://www.php.net/docs.php)
 - [Nginx Documentation](https://nginx.org/en/docs/)
 - [Redis Documentation](https://redis.io/documentation)
+- [Docker Best Practices](https://docs.docker.com/develop/dev-best-practices/)
 - [Symfony Best Practices](https://symfony.com/doc/current/best_practices.html)
-- [Docker Compose](https://docs.docker.com/compose/)
+- [Laravel Deployment](https://laravel.com/docs/deployment)
 - [Twelve-Factor App](https://12factor.net/)
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please:
+Contributions are welcome! Please follow these guidelines:
+
+### Getting Started
 
 1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing`)
-5. Open Pull Request
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Make your changes
+4. Run tests: `make test`
+5. Lint: `make lint`
+6. Commit: `git commit -m 'feat: add amazing feature'`
+7. Push: `git push origin feature/amazing-feature`
+8. Open a Pull Request
 
-**Standards:**
-- Follow [PSR-12](https://www.php-fig.org/psr/psr-12/) for PHP
-- Use [Conventional Commits](https://www.conventionalcommits.org/)
-- Add tests for new features
-- Update documentation
+### Standards
+
+- **Code Style**: Follow [PSR-12](https://www.php-fig.org/psr/psr-12/) for PHP code
+- **Commit Messages**: Use [Conventional Commits](https://www.conventionalcommits.org/)
+  - `feat:` New features
+  - `fix:` Bug fixes
+  - `docs:` Documentation changes
+  - `refactor:` Code refactoring
+  - `test:` Test additions/changes
+  - `chore:` Build/tooling changes
+- **Testing**: Add tests for new features
+- **Documentation**: Update relevant documentation
+
+### Before Submitting
+
+```bash
+make lint               # Lint Dockerfile
+make build-all          # Build all images
+make test               # Run tests
+make scan               # Security scan
+```
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) file.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+
+**TL;DR**: You can use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software.
 
 ---
 
-## 🌟 Support
+## 🌟 Support & Community
+
+### Get Help
 
 - **Issues**: [GitHub Issues](https://github.com/kariricode/php-api-stack/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/kariricode/php-api-stack/discussions)
 - **Docker Hub**: [kariricode/php-api-stack](https://hub.docker.com/r/kariricode/php-api-stack)
 
+### Report Bugs
+
+Found a bug? Please open an issue with:
+- Docker image version
+- Steps to reproduce
+- Expected vs actual behavior
+- Relevant logs
+
+### Request Features
+
+Have an idea? Open a discussion or issue with:
+- Use case description
+- Proposed solution
+- Any alternative solutions considered
+
 ---
 
-## 🧭 Roadmap & Contributing
+## 🧭 Roadmap
 
-Feature requests and PRs are welcome in the source repository:
+### Current Focus (v1.5.x)
 
-* GitHub: [https://github.com/kariricode/php-api-stack](https://github.com/kariricode/php-api-stack)
+- ✅ Comprehensive Makefile system with 50+ commands
+- ✅ Docker Hub automation and versioning
+- ✅ Docker Compose orchestration with profiles
+- ✅ Advanced health check system
+- 🔄 Performance benchmarking suite
+- 🔄 Automated CI/CD workflows
 
-For broader ecosystem projects, visit:
+### Future Plans (v1.6+)
 
-* KaririCode Framework: [https://github.com/KaririCode-Framework](https://github.com/KaririCode-Framework)
+- 📋 Multi-stage build optimization
+- 📋 Additional PECL extensions (gRPC, protobuf)
+- 📋 ARM64 native builds
+- 📋 Kubernetes manifests and Helm charts
+- 📋 Additional monitoring integrations (Datadog, New Relic)
+- 📋 Development containers (devcontainer.json)
+
+### Long-term Vision (v2.0+)
+
+- 📋 PHP 8.5 support
+- 📋 Alternative web servers (Caddy, FrankenPHP)
+- 📋 WebAssembly integration
+- 📋 Enhanced security profiles
+
+---
+
+## 📚 Related Projects
+
+This image is part of the **KaririCode** ecosystem:
+
+### KaririCode Framework
+
+Modern PHP framework with advanced features:
+
+- **Repository**: [KaririCode-Framework](https://github.com/KaririCode-Framework)
+- **Features**: ARFA architecture, DI container, Router, Auth, etc.
+- **Components**: 30+ independent packages
+- **Documentation**: Comprehensive guides and examples
+
+### KaririCode DevKit
+
+Development environment automation:
+
+- **Repository**: [kariricode/devkit](https://github.com/kariricode/devkit)
+- **Features**: Docker + Compose, quality tools, CI/CD
+- **Setup Time**: 2-3 minutes
+- **Integration**: Uses this Docker image
 
 ---
 
 ## 📝 Changelog
 
-**1.4.3** (Latest)
+### **v1.5.0** (2025-10-24)
 
-* ✨ **Makefile refactored** with semantic grouping by similarity (Build, Push, Runtime, Test, Validation, Release, etc.)
-* 🎯 **Enhanced development workflow** with dedicated dev container targets (`run-dev`, `stop-dev`, `restart-dev`, `logs-dev`, `shell-dev`)
-* 🧪 **Improved test targets** with health monitoring (`test-health-status`, `test-health-watch`)
-* 📊 **Better organization** of 50+ Make targets into logical categories
-* 📚 **Updated documentation** reflecting new command structure
-* 🔧 **Zero breaking changes** - all existing targets work identically
+**Docker Hub Integration:**
+- ✨ Fixed `hub-check` command display bug (showing 'ag' instead of tag names)
+- ✨ Simplified dev tagging strategy: only `dev` tag (removed `dev-X.Y.Z`)
+- ✨ Fixed `bump-patch/bump-minor/bump-major` dollar sign escaping
+- ✨ Improved `hub-check` output with checkmark indicators (✓/✗)
+- ✨ Added comprehensive Docker Hub utilities (`hub-tags`, `hub-info`, `hub-clean`)
 
-**1.2.1**
+**Breaking Changes:**
+- ⚠️ Dev versioned tags (`dev-X.Y.Z`) are no longer created or pushed to Docker Hub
 
-* Added comprehensive Makefile with Docker Compose integration
-* Added Docker Compose example with multiple profiles (db, loadbalancer, monitoring)
-* Improved documentation structure with dedicated guides
-* Enhanced health check system with monitoring capabilities
+### **v1.4.5** (2025-10-24)
 
-**1.2.0**
+**Build System:**
+- ✨ Fixed PHP extension quoting in Makefile (`PHP_CORE_EXTENSIONS`, `PHP_PECL_EXTENSIONS`)
+- ✨ Secure `.env` parsing in `build-from-env.sh` to prevent command execution
+- ✨ Proper escaping for build args with spaces
 
-* PHP 8.4, Nginx 1.27.3, Redis 7.2
-* Socket-based PHP-FPM; OPcache + JIT optimized
-* `/health.php` endpoint; improved entrypoint & config processor
-* Extensive env-var configuration for Nginx/PHP/Redis
+**Redis Integration:**
+- ✨ Automatic `REDIS_HOST` override to `127.0.0.1` for standalone containers
+- ✨ Smart DNS fallback in health.php for docker-compose vs standalone modes
+- ✨ Documentation improvements for `REDIS_HOST` behavior
 
-> Full release notes are available in the GitHub repository.
+**Dockerfile Fixes:**
+- 🐛 Fixed OPcache validation check (Zend extension vs regular extension)
+- 🐛 Added `util-linux` runtime dependency for UUID extension
+- 🐛 Fixed SC1075 shellcheck error (`else if` → `elif`)
+- ✨ Improved extension loading verification
+
+### **v1.4.3**
+
+**Makefile Refactoring:**
+- ✨ Semantic grouping by similarity (Build, Push, Runtime, Test, Validation, Release)
+- ✨ Enhanced development workflow with dedicated dev targets
+- ✨ Improved test targets with health monitoring
+- ✨ Better organization of 50+ Make targets
+- 📚 Updated documentation
+
+### **v1.2.1**
+
+- ✨ Added comprehensive Makefile with Docker Compose integration
+- ✨ Added Docker Compose example with multiple profiles
+- ✨ Improved documentation structure
+- ✨ Enhanced health check system
+
+### **v1.2.0**
+
+- ✨ PHP 8.4, Nginx 1.27.3, Redis 7.2
+- ✨ Socket-based PHP-FPM communication
+- ✨ OPcache + JIT optimization
+- ✨ `/health.php` comprehensive endpoint
+- ✨ Improved entrypoint and config processor
+- ✨ Extensive environment variable configuration
+
+### **v1.0.0**
+
+- 🎉 Initial release
+- ✨ PHP 8.3, Nginx 1.25, Redis 7.0
+- ✨ Basic production configuration
+- ✨ Docker and Docker Compose support
 
 ---
 
-**Made with 💚 by KaririCode** – [https://kariricode.org/](https://kariricode.org/)
+<div align="center">
+
+**Made with 💚 by [KaririCode](https://kariricode.org)**
+
+[![KaririCode](https://img.shields.io/badge/KaririCode-Framework-green)](https://kariricode.org)
+[![GitHub](https://img.shields.io/badge/GitHub-KaririCode-black)](https://github.com/KaririCode-Framework)
+
+</div>
