@@ -125,7 +125,7 @@ fi
 log_info "Creating required directories..."
 chown -R nginx:nginx /var/log/php /var/log/nginx /var/run/php
 chown -R redis:redis /var/log/redis || true
-chown -R nginx:nginx /var/run/nginx
+chown -R nginx:nginx /run/nginx
 
 # Session directory (file handler)
 if [ "${PHP_SESSION_SAVE_HANDLER}" = "files" ]; then
@@ -190,7 +190,7 @@ if [ "${DEMO_MODE}" = "true" ] && [ -f "/opt/php-api-stack-templates/index.php" 
   chown nginx:nginx /var/www/html/public/index.php
   chmod 644 /var/www/html/public/index.php
 else
-  rm -f /var/www/html/public/index.php
+  rm -f /var/www/html/public/index.php 2>/dev/null || true
 fi
 
 # HEALTH_CHECK_INSTALL
@@ -201,9 +201,36 @@ if [ "${HEALTH_CHECK_INSTALL}" = "true" ] && [ -f "/opt/php-api-stack-templates/
   chown nginx:nginx /var/www/html/public/health.php
   chmod 644 /var/www/html/public/health.php
 else
-  rm -f /var/www/html/public/health.php
+  rm -f /var/www/html/public/health.php 2>/dev/null || true
 fi
 
+# -----------------------------------------------------------------------------
+# XDEBUG
+# -----------------------------------------------------------------------------
+XDEBUG_IS_ACTIVE=false
+# Toggle Xdebug at runtime
+if [ "${XDEBUG_ENABLE:-0}" = "1" ]; then
+    # First, check if the .so module is actually installed
+    if php -m | grep -q xdebug; then
+        # Module is installed. Now, apply the configuration.
+        if [ -f /usr/local/etc/php/conf.d/xdebug.ini.template ]; then
+            envsubst < /usr/local/etc/php/conf.d/xdebug.ini.template \
+              > /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
+            log_info "Xdebug enabled (module loaded and config applied)"
+            XDEBUG_IS_ACTIVE=true
+        else
+            # Module is installed, but the .ini is missing (bad state)
+            log_warning "Xdebug module is installed, but xdebug.ini.template is missing!"
+        fi
+    else
+        # XDEBUG_ENABLE=1, but the module was not found in the image.
+        log_warning "XDEBUG_ENABLE=1, but Xdebug module is not installed. Skipping."
+    fi
+else
+    # XDEBUG_ENABLE is not 1, so ensure it's disabled.
+    rm -f /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini 2>/dev/null || true
+    log_info "Xdebug disabled"
+fi
 
 
 # ----------------------------------------------------------------------------
@@ -279,6 +306,9 @@ case "$1" in
 
         # PHP-FPM in background (daemonized)
         log_info "  -> Starting PHP-FPM..."
+        if [ "${XDEBUG_IS_ACTIVE}" = "true" ]; then
+            log_info "  -> Xdebug is active"
+        fi
         php-fpm -D
 
         # Nginx in foreground (PID 1) so it receives Docker signals (e.g., stop)
@@ -287,6 +317,9 @@ case "$1" in
         ;;
     php-fpm)
         log_info "Starting PHP-FPM only..."
+        if [ "${XDEBUG_IS_ACTIVE}" = "true" ]; then
+            log_info "  -> Xdebug is active"
+        fi
         exec php-fpm -F
         ;;
     nginx)
@@ -307,3 +340,4 @@ case "$1" in
         exec "$@"
         ;;
 esac
+

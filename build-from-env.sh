@@ -218,6 +218,7 @@ BUILD_CMD="$BUILD_CMD \
     --build-arg SYMFONY_CLI_VERSION=${SYMFONY_CLI_VERSION} \
     --build-arg PHP_CORE_EXTENSIONS=\"${PHP_CORE_EXTENSIONS}\" \
     --build-arg PHP_PECL_EXTENSIONS=\"${PHP_PECL_EXTENSIONS}\" \
+    --build-arg XDEBUG_VERSION="${XDEBUG_VERSION}" \
     --build-arg APP_NAME=\"${APP_NAME}\" \
     --build-arg APP_ENV=${APP_ENV} \
     --build-arg APP_PORT=${APP_PORT} \
@@ -233,7 +234,7 @@ fi
 
 # Add health check type for test builds
 if [ "$TEST_BUILD" = true ]; then
-    BUILD_CMD="$BUILD_CMD --build-arg HEALTH_CHECK_TYPE=comprehensive"
+    BUILD_CMD="$BUILD_CMD --build-arg "
     log_info "Building with comprehensive health check"
 fi
 

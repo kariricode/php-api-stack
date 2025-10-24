@@ -154,7 +154,6 @@ docker pull kariricode/php-api-stack:latest
 ## 🔍 Health Check
 
 * **Simple**: lightweight JSON at `/health.php`
-* **Comprehensive**: build with `HEALTH_CHECK_TYPE=comprehensive` for deeper PHP/Redis checks.
 
 Runtime verification:
 

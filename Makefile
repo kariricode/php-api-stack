@@ -66,8 +66,6 @@ BUILD_ARGS := \
     --build-arg NGINX_VERSION=$(NGINX_VERSION) \
     --build-arg REDIS_VERSION=$(REDIS_VERSION) \
     --build-arg ALPINE_VERSION=$(ALPINE_VERSION) \
-    --build-arg COMPOSER_VERSION=$(COMPOSER_VERSION) \
-    --build-arg SYMFONY_CLI_VERSION=$(SYMFONY_CLI_VERSION) \
     --build-arg BUILD_DATE="$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     --build-arg VCS_REF=$$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
@@ -78,11 +76,20 @@ APP_ENV ?= development
 APP_DEBUG ?= true
 
 DEV_BUILD_ARGS := \
---build-arg APP_ENV=$(APP_ENV) \
---build-arg APP_DEBUG=$(APP_DEBUG) \
---build-arg HEALTH_CHECK_INSTALL=$(HEALTH_CHECK_INSTALL) \
---build-arg ENABLE_XDEBUG=$(XDEBUG_ENABLE)
+	--build-arg APP_ENV=development \
+	--build-arg BUILD_TARGET=development \
+	--build-arg IMAGE_TAG=$(IMAGE_TAG) \
+	--build-arg APP_DEBUG=true \
+	--build-arg DEMO_MODE=true \
+	--build-arg COMPOSER_VERSION=$(COMPOSER_VERSION) \
+	--build-arg SYMFONY_CLI_VERSION=$(SYMFONY_CLI_VERSION) \
+	--build-arg PHP_CORE_EXTENSIONS=$(PHP_CORE_EXTENSIONS) \
+	--build-arg PHP_PECL_EXTENSIONS=$(PHP_PECL_EXTENSIONS) \
+	--build-arg XDEBUG_VERSION=${XDEBUG_VERSION} \
+	--build-arg HEALTH_CHECK_INSTALL=true \
+	--build-arg XDEBUG_ENABLE=1
 
+BUILD_CONTEXT ?= .
 # =============================================================
 # HELP
 # =============================================================
@@ -144,8 +151,13 @@ build: ## Build the Docker image locally (production)
 .PHONY: build-dev
 build-dev: ## Build development image (target via BUILD_TARGET, tag via IMAGE_TAG)
 	@echo "$(GREEN)Building development Docker image...$(NC)"
-	@docker build --no-cache $(BUILD_ARGS) $(DEV_BUILD_ARGS) \
-	-t $(FULL_IMAGE):$(IMAGE_TAG) .
+	@docker build \
+		--no-cache \
+		$(BUILD_ARGS) \
+		$(DEV_BUILD_ARGS) \
+		--target dev \
+		--tag $(FULL_IMAGE):$(IMAGE_TAG) \
+		$(BUILD_CONTEXT)
 	@echo "$(GREEN)✓ Dev image built as $(FULL_IMAGE):$(IMAGE_TAG)$(NC)"
 
 .PHONY: build-test
@@ -560,6 +572,65 @@ stats: ## Show container resource usage
 		echo "$(GREEN)Local container resource usage:$(NC)"; \
 		docker stats $(LOCAL_CONTAINER) --no-stream; \
 	fi
+
+.PHONY: docker-nuke
+docker-nuke: ## ⚠ DANGER: Remove ALL Docker containers, images, volumes, networks and caches (asks for YES)
+	@echo ""
+	@echo "$(RED)⚠ WARNING$(NC): This will DELETE $(YELLOW)ALL$(NC) Docker containers, images, volumes, networks, and build caches on this machine."
+	@echo "    Containers will be stopped and removed."
+	@echo "    Images will be removed."
+	@echo "    Volumes will be removed (data loss)."
+	@echo "    Custom networks will be removed."
+	@echo "    System/build caches will be pruned."
+	@echo ""
+	@printf "$(YELLOW)Type YES to proceed$(NC): "
+	@read ans; \
+	if [ "$$ans" != "YES" ]; then \
+		echo "$(CYAN)Aborted.$(NC)"; exit 1; \
+	fi; \
+	echo "$(GREEN)Proceeding with full Docker cleanup...$(NC)"; \
+	\
+	if [ -n "$$(docker ps -aq)" ]; then \
+		echo "$(CYAN)Stopping containers...$(NC)"; \
+		docker stop $$(docker ps -aq) || true; \
+		echo "$(CYAN)Removing containers...$(NC)"; \
+		docker rm -f $$(docker ps -aq) || true; \
+	else \
+		echo "$(YELLOW)No containers to remove.$(NC)"; \
+	fi; \
+	\
+	if [ -n "$$(docker images -q)" ]; then \
+		echo "$(CYAN)Removing images...$(NC)"; \
+		docker rmi -f $$(docker images -q) || true; \
+	else \
+		echo "$(YELLOW)No images to remove.$(NC)"; \
+	fi; \
+	\
+	if [ -n "$$(docker volume ls -q)" ]; then \
+		echo "$(CYAN)Removing volumes...$(NC)"; \
+		docker volume rm $$(docker volume ls -q) || true; \
+	else \
+		echo "$(YELLOW)No volumes to remove.$(NC)"; \
+	fi; \
+	\
+	NETS="$$(docker network ls -q | grep -vE '(^|[[:space:]])(bridge|host|none)$$' || true)"; \
+	if [ -n "$$NETS" ]; then \
+		echo "$(CYAN)Removing custom networks...$(NC)"; \
+		docker network rm $$NETS || true; \
+	else \
+		echo "$(YELLOW)No custom networks to remove.$(NC)"; \
+	fi; \
+	\
+	echo "$(CYAN)Pruning system caches (images/containers/networks)...$(NC)"; \
+	docker system prune -a --volumes -f || true; \
+	\
+	if command -v docker >/dev/null 2>&1; then \
+		echo "$(CYAN)Pruning build cache (buildx/builders)...$(NC)"; \
+		docker builder prune -a -f || true; \
+	fi; \
+	\
+	echo "$(GREEN)✓ Full Docker cleanup complete.$(NC)"
+
 
 # =============================================================
 # DOCKER-COMPOSE TARGETS (optional include)

@@ -8,7 +8,6 @@ ARG NGINX_VERSION=1.27.3
 ARG REDIS_VERSION=7.2
 ARG ALPINE_VERSION=3.21
 ARG COMPOSER_VERSION=2.8.12
-ARG SYMFONY_CLI_VERSION=5.15.1
 ARG VERSION=1.2.0
 
 # Build metadata for reproducibility
@@ -42,13 +41,9 @@ ARG NGINX_VERSION
 ARG REDIS_VERSION
 ARG ALPINE_VERSION
 ARG COMPOSER_VERSION
-ARG SYMFONY_CLI_VERSION
 ARG VERSION
 ARG BUILD_DATE
 ARG VCS_REF
-
-# Feature flags
-ARG HEALTH_CHECK_TYPE=simple
 
 # Labels for OCI metadata and traceability
 LABEL maintainer="KaririCode <community@kariricode.org>" \
@@ -66,7 +61,8 @@ LABEL maintainer="KaririCode <community@kariricode.org>" \
 # Environment defaults for Composer, PHP, and stack
 ENV COMPOSER_ALLOW_SUPERUSER=1 \
     COMPOSER_HOME=/composer \
-    PATH="/composer/vendor/bin:/symfony/bin:/usr/local/bin:/usr/sbin:/sbin:$PATH" \
+    # PATH="/composer/vendor/bin:/symfony/bin:/usr/local/bin:/usr/sbin:/sbin:$PATH" \
+    PATH="/usr/bin:/usr/local/bin:/composer/vendor/bin:/symfony/bin:/usr/sbin:/sbin:$PATH" \
     PHP_OPCACHE_VALIDATE_TIMESTAMPS=${PHP_OPCACHE_VALIDATE_TIMESTAMPS} \
     PHP_OPCACHE_MAX_ACCELERATED_FILES=${PHP_OPCACHE_MAX_ACCELERATED_FILES} \
     PHP_OPCACHE_MEMORY_CONSUMPTION=${PHP_OPCACHE_MEMORY_CONSUMPTION} \
@@ -211,6 +207,7 @@ COPY php/php-fpm.conf              /usr/local/etc/php-fpm.conf.template
 COPY php/www.conf                  /usr/local/etc/php-fpm.d/www.conf.template
 COPY php/monitoring.conf           /usr/local/etc/php-fpm.d/monitoring.conf.template
 COPY redis/redis.conf              /etc/redis/redis.conf.template
+COPY php/xdebug.ini                /usr/local/etc/php/conf.d/xdebug.ini.template
 
 COPY docker-entrypoint.sh          /usr/local/bin/docker-entrypoint
 COPY scripts/process-configs.sh    /usr/local/bin/process-configs
@@ -261,30 +258,61 @@ CMD ["start"]
 # ======================================================================
 FROM base AS dev
 
+# Propagate ARGs needed for this stage
 ARG SYMFONY_CLI_VERSION
-ARG ENABLE_XDEBUG=0
-ARG APP_ENV=production
+ARG XDEBUG_VERSION
+ARG XDEBUG_ENABLE
+ARG APP_ENV=development
 
-# hadolint ignore=DL3018
+# Install dev-only runtime tools (htop) and all build-time dependencies
+# for Symfony CLI and Xdebug. We install/uninstall build-deps in one
+# layer to keep the final image clean and efficient.
 RUN set -eux; \
-    apk add --no-cache procps htop; \
+    # 1. Install runtime tools
+    apk add --no-cache \
+    procps \
+    htop; \
+    \
+    # 2. Install ALL build-time dependencies as a single virtual package
+    apk add --no-cache --virtual .dev-build-deps \
+    $PHPIZE_DEPS \
+    build-base \
+    curl \
+    tar \
+    linux-headers; \
+    \
+    # 3. --- Install Symfony CLI ---
     if [ "$APP_ENV" = "development" ]; then \
-    wget -q -O /tmp/symfony-installer https://get.symfony.com/cli/installer; \
-    bash /tmp/symfony-installer; \
-    mv /root/.symfony*/bin/symfony /usr/local/bin/symfony; \
+    echo "Installing Symfony CLI v${SYMFONY_CLI_VERSION}..."; \
+    wget -q -O /tmp/symfony.tar.gz \
+    "https://github.com/symfony-cli/symfony-cli/releases/download/v${SYMFONY_CLI_VERSION}/symfony-cli_linux_amd64.tar.gz"; \
+    # Extract only the binary to the bin path
+    tar -xzf /tmp/symfony.tar.gz -C /usr/local/bin symfony; \
     chmod +x /usr/local/bin/symfony; \
-    rm -rf /root/.symfony* /tmp/symfony-installer; \
+    rm /tmp/symfony.tar.gz; \
     symfony version || true; \
     else \
     echo "Skipping Symfony CLI install (APP_ENV=$APP_ENV)"; \
-    fi
-
-# Optional Xdebug installation for local debugging
-# hadolint ignore=DL3018
-RUN set -eux; \
-    if [ "${ENABLE_XDEBUG}" = "1" ]; then \
-    apk add --no-cache --virtual .xd-build "$PHPIZE_DEPS"; \
-    pecl install xdebug; \
-    docker-php-ext-enable xdebug; \
-    apk del --no-cache .xd-build || true; \
-    fi
+    fi; \
+    \
+    # 4. --- Install Xdebug (manual compile) ---
+    if [ "$APP_ENV" = "development" ] && [ "$XDEBUG_ENABLE" = "1" ]; then \
+    echo "Installing Xdebug v${XDEBUG_VERSION}..."; \
+    # Download and extract
+    curl -O https://pecl.php.net/get/xdebug-${XDEBUG_VERSION}.tgz; \
+    tar -xzf xdebug-${XDEBUG_VERSION}.tgz; \
+    cd xdebug-${XDEBUG_VERSION}; \
+    # Compile and install
+    phpize; \
+    ./configure; \
+    make; \
+    make install; \
+    # Cleanup source
+    cd ..; \
+    rm -rf xdebug-${XDEBUG_VERSION}.tgz xdebug-${XDEBUG_VERSION}; \
+    else \
+    echo "Skipping Xdebug install (APP_ENV=${APP_ENV} XDEBUG_ENABLE=${XDEBUG_ENABLE})"; \
+    fi; \
+    \
+    # 5. --- Cleanup all build dependencies ---
+    apk del .dev-build-deps
