@@ -117,7 +117,7 @@ RUN set -eux; \
     apk add --no-cache bash shadow su-exec tini; \
     \
     # Network / TLS
-    apk add --no-cache git curl wget ca-certificates openssl; \
+    apk add --no-cache git curl wget ca-certificates openssl make; \
     \
     # Misc runtime libs
     apk add --no-cache gettext tzdata pcre2 zlib p7zip; \
@@ -504,7 +504,18 @@ RUN set -eux; \
     echo "Setting up development environment..."; \
     \
     # 1. Install runtime dev tools (kept after build)
-    apk add --no-cache procps htop; \
+    apk add --no-cache \
+    procps \
+    htop \
+    bash-completion \
+    vim \
+    less \
+    jq \
+    yq \
+    strace \
+    lsof \
+    iproute2 \
+    netcat-openbsd; \
     \
     # 2. Install ALL build-time dependencies as a single virtual package
     apk add --no-cache --virtual .dev-build-deps \
