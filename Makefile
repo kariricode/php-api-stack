@@ -54,13 +54,8 @@ ALPINE_VERSION?=3.21
 COMPOSER_VERSION?=2.8.12
 SYMFONY_CLI_VERSION?=5.15.1
 
-DEMO_MODE ?= false
-HEALTH_CHECK_INSTALL ?= false
-
 # Common build args block
 BUILD_ARGS := \
-	--build-arg DEMO_MODE=$(DEMO_MODE) \
-	--build-arg HEALTH_CHECK_INSTALL=$(HEALTH_CHECK_INSTALL) \
 	--build-arg VERSION=$(VERSION) \
 	--build-arg PHP_VERSION=$(PHP_VERSION) \
 	--build-arg PHP_CORE_EXTENSIONS=$(PHP_CORE_EXTENSIONS) \
@@ -85,9 +80,7 @@ PROD_BUILD_ARGS := \
 	--build-arg PHP_OPCACHE_ENABLE=1 \
 	--build-arg PHP_OPCACHE_MEMORY_CONSUMPTION=256 \
 	--build-arg XDEBUG_ENABLE=0 \
-	--build-arg APP_DEBUG=false \
-	--build-arg DEMO_MODE=false \
-	--build-arg HEALTH_CHECK_INSTALL=false
+	--build-arg APP_DEBUG=false
 
 
 # Development build args
@@ -98,10 +91,8 @@ XDEBUG_VERSION ?= 3.4.6
 DEV_BUILD_ARGS := \
 	--build-arg APP_ENV=development \
 	--build-arg APP_DEBUG=true \
-	--build-arg DEMO_MODE=true \
 	--build-arg SYMFONY_CLI_VERSION=$(SYMFONY_CLI_VERSION) \
 	--build-arg XDEBUG_VERSION=$(XDEBUG_VERSION) \
-	--build-arg HEALTH_CHECK_INSTALL=true \
 	--build-arg XDEBUG_ENABLE=$(XDEBUG_ENABLE)
 
 .PHONY: help
@@ -186,11 +177,10 @@ build-base: ## Build base image (target=base) - for debugging only
 
 .PHONY: build-test
 build-test: ## Build test image (production with health check)
-	@echo "$(GREEN)Building test image with comprehensive health check...$(NC)"
+	@echo "$(GREEN)Building test image...$(NC)"
 	@docker build \
 		$(BUILD_ARGS) \
 		$(PROD_BUILD_ARGS) \
-		--build-arg HEALTH_CHECK_INSTALL=true \
 		--target production \
 		-t $(FULL_IMAGE):test \
 		.
@@ -229,11 +219,13 @@ run-dev: ## Run dev container with Xdebug
 	@echo "$(GREEN)Starting dev container...$(NC)"
 	@docker stop $(DEV_CONTAINER) >/dev/null 2>&1 || true
 	@docker rm $(DEV_CONTAINER) >/dev/null 2>&1 || true
+
 	@if docker ps --format '{{.Ports}}' | grep -q '$(DEV_PORT)->'; then \
 		echo "$(RED)X Port $(DEV_PORT) is already in use!$(NC)"; \
 		echo "$(YELLOW)Try another port:$(NC) make run-dev DEV_PORT=9000"; \
 		exit 1; \
 	fi
+
 	@docker run -d \
 		--name $(DEV_CONTAINER) \
 		-p $(DEV_PORT):80 \
@@ -241,10 +233,13 @@ run-dev: ## Run dev container with Xdebug
 		--env-file $(ENV_FILE) \
 		-e APP_ENV=development \
 		-e XDEBUG_ENABLE=1 \
+		-v $(PWD):/var/www/html \
 		-v $(PWD)/logs:/var/log \
 		$(FULL_IMAGE):$(IMAGE_TAG)
+
 	@echo "$(GREEN)OK: Dev container running at http://localhost:$(DEV_PORT)$(NC)"
 	@echo "$(CYAN)Xdebug enabled on port 9003$(NC)"
+
 
 .PHONY: run-test
 run-test: build-test ## Run test container

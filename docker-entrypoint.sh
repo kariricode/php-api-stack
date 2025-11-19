@@ -180,30 +180,6 @@ if [ -f "/var/www/html/bin/console" ]; then
     fi
 fi
 
-# ----------------------------------------------------------------------------
-# DEMO_MODE
-# ----------------------------------------------------------------------------
-if [ "${DEMO_MODE}" = "true" ] && [ -f "/opt/php-api-stack-templates/index.php" ]; then
-  log_info "Publishing demo index.php to /var/www/html/public"
-  mkdir -p /var/www/html/public
-  cp /opt/php-api-stack-templates/index.php /var/www/html/public/index.php
-  chown nginx:nginx /var/www/html/public/index.php
-  chmod 644 /var/www/html/public/index.php
-else
-  rm -f /var/www/html/public/index.php 2>/dev/null || true
-fi
-
-# HEALTH_CHECK_INSTALL
-if [ "${HEALTH_CHECK_INSTALL}" = "true" ] && [ -f "/opt/php-api-stack-templates/health.php" ]; then
-  log_info "Publishing health.php to /var/www/html/public"
-  mkdir -p /var/www/html/public
-  cp /opt/php-api-stack-templates/health.php /var/www/html/public/health.php
-  chown nginx:nginx /var/www/html/public/health.php
-  chmod 644 /var/www/html/public/health.php
-else
-  rm -f /var/www/html/public/health.php 2>/dev/null || true
-fi
-
 # -----------------------------------------------------------------------------
 # XDEBUG
 # -----------------------------------------------------------------------------

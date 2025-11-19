@@ -249,11 +249,26 @@ else
 fi
 
 # Validate Nginx
-if nginx -t 2>/dev/null; then
+log_info "Testing Nginx configuration..."
+NGINX_TEST_OUTPUT=$(nginx -t 2>&1)
+NGINX_EXIT_CODE=$?
+
+if [ $NGINX_EXIT_CODE -eq 0 ]; then
     log_info "  ✓ Nginx configuration is valid"
+elif echo "$NGINX_TEST_OUTPUT" | grep -q "syntax is ok" && echo "$NGINX_TEST_OUTPUT" | grep -q "Permission denied"; then
+    log_info "  ✓ Nginx configuration syntax is valid (ignoring PID permission during build)"
 else
+    echo "-----------------------------------------------"
     log_error "  ✗ Nginx configuration test failed!"
-    nginx -t
+    echo "Exit code: $NGINX_EXIT_CODE"
+    echo "-----------------------------------------------"
+    echo "Full Nginx test output:"
+    echo "$NGINX_TEST_OUTPUT"
+    echo "-----------------------------------------------"
+    echo "-----------------------------------------------"
+    echo "Nginx error log:"
+    cat /var/log/nginx/error.log 2>/dev/null || echo "No error log available"
+    echo "-----------------------------------------------"
     exit 1
 fi
 

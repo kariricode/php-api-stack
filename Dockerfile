@@ -425,20 +425,6 @@ COPY scripts/quick-start.sh        /usr/local/bin/quick-start
 
 RUN chmod +x /usr/local/bin/docker-entrypoint /usr/local/bin/process-configs /usr/local/bin/quick-start
 
-# ----------------------------------------------------------------------------
-# Healthcheck templates (staged, published at runtime)
-# ----------------------------------------------------------------------------
-RUN install -d -m 0755 /opt/php-api-stack-templates
-
-COPY --chown=nginx:nginx php/index.php /opt/php-api-stack-templates/index.php
-COPY --chown=nginx:nginx php/health.php /opt/php-api-stack-templates/health.php
-
-# Validate syntax at build time
-RUN set -eux; \
-    php -l /opt/php-api-stack-templates/index.php; \
-    php -l /opt/php-api-stack-templates/health.php; \
-    echo "✓ Healthcheck templates validated successfully"
-
 WORKDIR /var/www/html
 
 # ============================================================================
