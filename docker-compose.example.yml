@@ -3,9 +3,6 @@ services:
     image: kariricode/php-api-stack:latest
     container_name: php-api-stack
     restart: unless-stopped
-    environment:
-      - DEMO_MODE=true
-      - HEALTH_CHECK_INSTALL=true
     env_file:
       - .env
     ports:
